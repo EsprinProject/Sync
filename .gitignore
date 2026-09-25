@@ -1,3 +1,7 @@
 data/
 __pycache__/
 .github/agent/tmp
+# 网页版客户端：启动时从 EsprinProject/Web 克隆到这里
+/web/
+# 克隆时先落地的临时目录（成功即改名成 web/，异常退出才会留下）
+/.web-clone-*/

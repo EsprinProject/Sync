@@ -8,7 +8,9 @@ import re
 import secrets
 import shutil
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -59,6 +61,10 @@ WEB_ASSET_PATHS = (
     "/icon-512-maskable.png",
 )
 WEB_ASSET_PREFIXES = ("/styles/", "/scripts/", "/fonts/")
+# 网页版客户端单独成仓库：启动时克隆到 web/，页面与静态资源都取自那份克隆
+WEB_REPO_URL = "https://github.com/EsprinProject/Web.git"
+WEB_REPO_REF = "main"
+GIT_TIMEOUT_SECONDS = 180
 # 管理后台在 /admin：页面静态资源（样式、脚本、图标、字体）从 manager/ 目录按 /admin/ 下的路径取
 MANAGER_ASSET_PATHS = ("/app.css", "/app.js", "/favicon.png")
 MANAGER_ASSET_PREFIXES = ("/fonts/",)
@@ -1126,8 +1132,15 @@ MISSING_PAGE_HTML = """<!DOCTYPE html>
 <h1 style="font-size:18px;margin-bottom:12px">找不到{title}的页面文件</h1>
 <p style="color:#8b949e">服务端读取入口页面的位置：</p>
 <p><code style="background:#21262d;padding:6px 10px;border-radius:6px;display:inline-block">{path}</code></p>
+{extra}
 </body></html>
 """
+# 网页版客户端的补白：它是独立仓库，页面由服务端克隆得到，不在本仓库里
+WEB_MISSING_HINT = (
+    '<p style="color:#8b949e">网页版客户端来自仓库 '
+    '<code style="background:#21262d;padding:2px 6px;border-radius:4px">{repo}</code>（分支 <code>{ref}</code>），'
+    '由服务端启动时克隆到该目录</p>'
+)
 
 
 def manager_dir():
@@ -1138,13 +1151,14 @@ def web_dir():
     return os.path.join(SCRIPT_DIR, WEB_DIR_NAME)
 
 
-def read_index_html(root, title):
+def read_index_html(root, title, extra=""):
     path = os.path.join(root, INDEX_NAME)
     try:
         with open(path, "r", encoding="utf-8") as handle:
             return handle.read()
     except OSError:
-        return MISSING_PAGE_HTML.replace("{title}", title).replace("{path}", path)
+        return (MISSING_PAGE_HTML.replace("{title}", title).replace("{path}", path)
+                .replace("{extra}", extra))
 
 
 def read_manager_index():
@@ -1152,7 +1166,101 @@ def read_manager_index():
 
 
 def read_web_index():
-    return read_index_html(web_dir(), "网页版客户端")
+    return read_index_html(web_dir(), "网页版客户端",
+                           WEB_MISSING_HINT.format(repo=WEB_REPO_URL, ref=WEB_REPO_REF))
+
+
+def web_client_ready():
+    return os.path.isfile(os.path.join(web_dir(), INDEX_NAME))
+
+
+def web_client_state():
+    """web/ 的来路：clone（带页面的一份克隆）/ files（有页面但不是仓库）/ missing（没有页面）。
+
+    没有页面就算 missing：半份克隆（.git 在、页面不在）也归到这里，好让启动时重新克隆。
+    """
+    if not web_client_ready():
+        return "missing"
+    return "clone" if os.path.isdir(os.path.join(web_dir(), ".git")) else "files"
+
+
+def remove_tree(path):
+    """整目录删掉（不存在就什么都不做）。
+
+    git 写下的对象文件在 Windows 上是只读的，shutil.rmtree 会因此删不干净：
+    先逐个去掉只读位再删。"""
+    if not os.path.isdir(path):
+        return
+    for base, dirs, files in os.walk(path):
+        for name in list(files) + list(dirs):
+            try:
+                os.chmod(os.path.join(base, name), 0o700)
+            except OSError:
+                pass
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def run_git(args, cwd=None):
+    """跑一条 git 命令；返回 (ok, detail)，detail 是 git 的输出或失败原因。"""
+    try:
+        result = subprocess.run(["git"] + list(args), cwd=cwd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=GIT_TIMEOUT_SECONDS)
+    except FileNotFoundError:
+        return False, "git 不在 PATH 里"
+    except subprocess.TimeoutExpired:
+        return False, "超时（{}s）".format(GIT_TIMEOUT_SECONDS)
+    except OSError as error:
+        return False, str(error)
+    output = result.stdout.decode("utf-8", "replace").strip()
+    if result.returncode != 0:
+        return False, output or "exit={}".format(result.returncode)
+    return True, output
+
+
+def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clone=True):
+    """让网页版客户端就位：web/ 里没有页面就从 Web 仓库克隆，update 时再 ff-only 拉一次。
+
+    没有 git、克隆失败、拉取失败都只记日志：服务端其余部分照常运行，根路径返回一页说明。
+    """
+    root = web_dir()
+    state = web_client_state()
+    cloned = False
+
+    if state == "files":
+        # 目录里的页面不是克隆来的（手工放的），原样使用，也没有可拉的上游
+        log("WARN", "Web", "dir is not a clone, served as is (dir={})".format(root))
+        return
+
+    if state == "missing":
+        if not clone:
+            log("WARN", "Web", "clone skipped: no index (dir={} flag=--no-web-clone)".format(root))
+            return
+        # 克隆要求目标不存在或是空的，而 web/ 下可能留着手工放的零散文件：
+        # 先克隆到旁边的临时目录，成了再整体换过去（失败时原地那份一个字节不动）
+        staging = tempfile.mkdtemp(prefix=".web-clone-", dir=SCRIPT_DIR)
+        ok, detail = run_git(["clone", "--depth", "1", "--branch", ref, repo_url, staging])
+        if not ok:
+            remove_tree(staging)
+            log("ERROR", "Web", "clone failed: repo={} ref={} dir={} detail={}".format(
+                repo_url, ref, root, detail))
+            return
+        try:
+            remove_tree(root)
+            os.replace(staging, root)
+        except OSError as error:
+            remove_tree(staging)
+            log("ERROR", "Web", "swap failed: dir={} detail={}".format(root, error))
+            return
+        cloned = True
+        log("INFO", "Web", "clone done repo={} ref={} dir={}".format(repo_url, ref, root))
+
+    if not update or cloned:
+        return
+    ok, detail = run_git(["pull", "--ff-only"], cwd=root)
+    if ok:
+        log("INFO", "Web", "pull done repo={} ref={}".format(repo_url, ref))
+    else:
+        log("ERROR", "Web", "pull failed: dir={} detail={}".format(root, detail))
 
 
 class ApiHandler(BaseHTTPRequestHandler):
@@ -1222,6 +1330,8 @@ class ApiHandler(BaseHTTPRequestHandler):
     # 静态资源：相对路径先归一化，再确认落在指定根目录内，避免穿越到目录之外
     def _send_static_asset(self, root, relative, fallback_name=""):
         relative = str(relative or fallback_name).lstrip("/")
+        # 两边都规整过再比前缀：root 由启动参数拼出，可能带着未展开的段
+        root = os.path.abspath(root)
         target = os.path.abspath(os.path.join(root, relative))
         if not target.startswith(root + os.sep) or not os.path.isfile(target):
             self._send(404, {"ok": False, "error": "找不到文件"})
@@ -1362,10 +1472,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # 网页版客户端：根路径返回页面，页面资源（样式、脚本、图标、字体）按白名单从 web/ 目录取
+        # 网页版客户端：根路径返回页面（页面来自 Web 仓库的克隆），静态资源按白名单从同一目录取
         if parsed.path in ("/", "/index.html"):
             page = read_web_index()
-            self._send(200, raw=page.encode("utf-8"), content_type="text/html; charset=utf-8",
+            self._send(200 if web_client_ready() else 503, raw=page.encode("utf-8"),
+                       content_type="text/html; charset=utf-8",
                        extra_headers={"Cache-Control": "no-store"})
             return
 
@@ -1948,25 +2059,39 @@ def selftest():
         status, body = post(sync + "/ops", {"device": "dev-a", "ops": [{"op": "put", "path": "../evil.md", "data": "x"}]})
         check("越界路径被拒绝", body["ok"] is False and "路径不合法" in body.get("error", ""), repr(body))
 
+        log("INFO", "Selftest", "section=web")
+        # 网页版客户端是 Web 仓库的克隆：本地没克隆就没这一节可测，跳过而不算通过
+        if not web_client_ready():
+            log("WARN", "Selftest", "网页版客户端不在 web/ 下，跳过这一节 (dir={})".format(web_dir()))
+        else:
+            status, page = get("/", token=None)
+            check("根路径返回网页版客户端", status == 200 and "EsprinNemo" in page.get("_raw", ""), repr(page)[:160])
+
+            status, page = get("/index.html", token=None)
+            check("网页版也能按 /index.html 打开", status == 200 and "<!DOCTYPE html>" in page.get("_raw", ""), repr(page)[:160])
+
+            status, css = get("/styles/tokens.css", token=None)
+            check("网页版样式可直接取用", status == 200 and "--bg-body" in css.get("_raw", ""), repr(css)[:80])
+
+            status, body = get("/scripts/app.js", token=None)
+            check("网页版脚本可直接取用", status == 200 and "showConnectGate" in body.get("_raw", ""), repr(body)[:80])
+
+            # 字体随网页版仓库分发（离线可用的前提）：直接从白名单取一次原始字节，
+            # 不走 call()——它按 UTF-8 解码，二进制会直接抛出
+            with urllib.request.urlopen(
+                    base + "/fonts/material-symbols/material-symbols-rounded.woff2", timeout=30) as response:
+                font_status, font_bytes = response.status, response.read()
+            check("网页版图标字体可直接取用（离线可用）",
+                  font_status == 200 and font_bytes[:4] == b"wOF2" and len(font_bytes) > 1000,
+                  "status={} size={}".format(font_status, len(font_bytes)))
+
+            status, body = get("/styles/../../sync.py", token=None)
+            check("网页版静态资源不允许穿越出 web 目录", status == 404, repr(body))
+
+            status, body = get("/README.md", token=None)
+            check("网页版目录里未列入白名单的文件不对外提供", status != 200, repr(body)[:80])
+
         log("INFO", "Selftest", "section=admin")
-        status, page = get("/", token=None)
-        check("根路径返回网页版客户端", status == 200 and "EsprinNemo" in page.get("_raw", ""), repr(page)[:160])
-
-        status, page = get("/index.html", token=None)
-        check("网页版也能按 /index.html 打开", status == 200 and "<!DOCTYPE html>" in page.get("_raw", ""), repr(page)[:160])
-
-        status, css = get("/styles/tokens.css", token=None)
-        check("网页版样式可直接取用", status == 200 and "--bg-body" in css.get("_raw", ""), repr(css)[:80])
-
-        status, body = get("/scripts/app.js", token=None)
-        check("网页版脚本可直接取用", status == 200 and "showConnectGate" in body.get("_raw", ""), repr(body)[:80])
-
-        status, body = get("/styles/../../sync.py", token=None)
-        check("网页版静态资源不允许穿越出 web 目录", status == 404, repr(body))
-
-        status, body = get("/README.md", token=None)
-        check("网页版目录里未列入白名单的文件不对外提供", status != 200, repr(body)[:80])
-
         status, page = get(ADMIN_PATH, token=None)
         check("/admin 返回管理页面", status == 200 and "EsprinSync" in page.get("_raw", ""), repr(page)[:160])
 
@@ -2498,6 +2623,11 @@ def main(argv=None):
     parser.add_argument("--port", type=int, help=f"监听端口，不传则用 {CONFIG_NAME} 里的 port，再不行用 {DEFAULT_PORT}")
     parser.add_argument("--data", default="./data", help="数据目录：账户表与各账户的日志、令牌都在这里")
     parser.add_argument("--token", default=os.environ.get("ESPRIN_TOKEN", ""), help="访问令牌，等同内置账户的一份令牌；不传则凭据只来自管理后台（账户密码登录或在那里创建的访问令牌）")
+    parser.add_argument("--web-repo", default=WEB_REPO_URL,
+                        help=f"网页版客户端仓库，{WEB_DIR_NAME}/ 里没有页面时从这里克隆（默认 {WEB_REPO_URL}）")
+    parser.add_argument("--web-ref", default=WEB_REPO_REF, help=f"克隆该仓库的哪个分支或标签（默认 {WEB_REPO_REF}）")
+    parser.add_argument("--web-update", action="store_true", help="启动时对已有的克隆做一次 git pull --ff-only")
+    parser.add_argument("--no-web-clone", action="store_true", help=f"不克隆网页版客户端，只用现有的 {WEB_DIR_NAME}/ 目录")
     parser.add_argument("--selftest", action="store_true", help="跑一遍内置自测后退出")
     args = parser.parse_args(argv)
 
@@ -2506,6 +2636,9 @@ def main(argv=None):
 
     data_dir = os.path.abspath(args.data)
     os.makedirs(data_dir, exist_ok=True)
+
+    ensure_web_client(repo_url=args.web_repo, ref=args.web_ref,
+                      update=args.web_update, clone=not args.no_web_clone)
 
     config_file = config_path(data_dir)
     config = read_config(data_dir)
@@ -2529,7 +2662,8 @@ def main(argv=None):
     log("INFO", "Sync", "endpoint={}/* origin=http://{}:{}".format(SYNC_PATH, url_host, bound_port))
     log("INFO", "Storage", "journal={} journalId={} ops={} latestSeq={}".format(
         journal.path, journal.journal_id, journal.count, journal.latest_seq))
-    log("INFO", "Web", "endpoint=/ dir={} index={}".format(web_dir(), os.path.isfile(os.path.join(web_dir(), INDEX_NAME))))
+    log("INFO", "Web", "endpoint=/ dir={} index={} source={} repo={} ref={}".format(
+        web_dir(), web_client_ready(), web_client_state(), args.web_repo, args.web_ref))
     log("INFO", "Admin", "endpoint={} dir={} api={} passwordSet={}".format(
         ADMIN_PATH, manager_dir(), API_PREFIX, users.password_set()))
     log("INFO", "Auth", "tokenSource={} accountCount={} tokenCount={}".format(

@@ -22,7 +22,7 @@ function beginAppearanceFade() {
 }
 
 /* ---------------- 安装为应用（PWA） ----------------
-   清单与图标是静态文件（见 web/manifest.webmanifest），这里只管两件事：
+   清单与图标是静态文件（见 manifest.webmanifest），这里只管两件事：
    浏览器界面色跟着主题走，以及注册离线外壳的 Service Worker。 */
 
 // 浏览器界面色（Android 状态栏、独立窗口的标题栏）：取标题栏底色，换肤后立即跟上
@@ -34,10 +34,11 @@ function syncThemeColor() {
 }
 
 // Service Worker 把界面外壳存进缓存，断网时仍能打开这一页。
-// 它只在安全上下文里能注册：局域网 http 下浏览器不给，那种环境直接跳过（不影响其它功能）
+// 它只在安全上下文的 http(s) 下能注册：局域网 http 与 file:// 都会被浏览器拒掉，那种环境直接跳过
 function registerServiceWorker() {
-    if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
+    const httpish = /^https?:$/i.test(window.location.protocol);
+    if (!httpish || !('serviceWorker' in navigator) || !window.isSecureContext) return;
+    navigator.serviceWorker.register('sw.js').catch((error) => {
         console.warn(`[WARN] [PWA] Service worker 注册失败 (detail=${error && error.message})`);
     });
 }
@@ -750,7 +751,7 @@ function bindEvents() {
     document.getElementById('btn-sync-status').onclick = async () => {
         // 未连接到服务端时弹连接层；已连接则立即同步一次
         if (!State.sync.enabled) {
-            showConnectGate();
+            showConnectGate(Sync.connectionMessage || '');
             return;
         }
         const result = await Sync.syncNow({ reason: '手动' });
@@ -919,8 +920,11 @@ function handleGlobalKeydown(event) {
             closeDialog(null);
             return;
         }
-        // 连接层是模态的：没有凭据就不能进入界面，按 Esc 也不关闭
-        if (!document.getElementById('gate-mask').classList.contains('hidden')) return;
+        // 连接层可以收起：收起就是留在本地模式（同步仍可从状态 chip 再进来）
+        if (!document.getElementById('gate-mask').classList.contains('hidden')) {
+            closeConnectGate('Esc');
+            return;
+        }
         // 底栏展开着的面板
         if (isMobileSheetOpen()) {
             setMobileSheetOpen(false);
@@ -1069,6 +1073,15 @@ function hideConnectGate() {
     setGateMessage('');
 }
 
+/* 收起连接层：同步是可选项，关掉这层就留在本地模式（界面与本地副本照常），
+   要再连就从顶栏那枚状态 chip 进来。 */
+function closeConnectGate(source = '') {
+    if (document.getElementById('gate-mask').classList.contains('hidden')) return;
+    hideConnectGate();
+    renderSyncIndicator();
+    console.log(`[INFO] [App] 连接层已收起 (source=${source || '关闭'})`);
+}
+
 async function submitConnectGate() {
     if (gateBusy) return;
     const account = document.getElementById('gate-account').value.trim() || 'admin';
@@ -1119,6 +1132,12 @@ async function submitConnectGate() {
 
 function bindConnectGate() {
     document.getElementById('gate-submit').onclick = submitConnectGate;
+    document.getElementById('gate-close').onclick = () => closeConnectGate('关闭按钮');
+    // 点卡片外那圈遮罩也收掉：与确认弹窗（.dialog-mask）同一套约定
+    const mask = document.getElementById('gate-mask');
+    mask.addEventListener('click', (event) => {
+        if (event.target === mask) closeConnectGate('遮罩');
+    });
     document.getElementById('gate-mode-toggle').onclick = () => setGateMode(gateMode === 'password' ? 'token' : 'password');
     ['gate-account', 'gate-password', 'gate-token'].forEach((id) => {
         document.getElementById(id).addEventListener('keydown', (event) => {
@@ -1130,11 +1149,19 @@ function bindConnectGate() {
     });
 }
 
-// 启动时自动连接：连不上或需要凭据时一律停在连接层，拿到凭据前不进入笔记界面
+// 启动时自动连接：服务端在但需要凭据时停在连接层（拿到凭据前不进入笔记界面）；
+// 本页不是 EsprinSync 托管的（没有 /health）则按本地模式直接进入界面，只没有同步
 async function autoConnect(message = '') {
     const result = await Sync.connect({ reason: '启动' });
     if (result.ok) {
         renderApp();
+        return;
+    }
+    if (result.localOnly) {
+        console.log(`[INFO] [App] 本页不由 EsprinSync 托管，按本地模式运行 (detail=${result.error})`);
+        renderSyncIndicator();
+        // 设置页可能已经先画过（上一轮停在设置页）：重绘一次，把服务器与同步那一节去掉
+        if (document.getElementById('settings-content')) renderSettingsView();
         return;
     }
     if (!result.needAuth) {

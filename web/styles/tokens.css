@@ -1,6 +1,27 @@
 /* 设计令牌：色板、圆角、字体与动效变量。取值与桌面版 EsprinNemo 的 styles/tokens.css 一致，
    浅色主题由 :root.light 覆盖 */
 
+/* 字体随仓库分发：断网、file://、局域网内都照常显示，不依赖任何外链。
+   Material Symbols 是图标字形（按 ligature 取字，见 base.css 的 .ms-icon），
+   Mohave 是左上角应用名用的可变字重字体。更新时从 npm 包 material-symbols 与与 Mohave 官方包
+   取同名文件覆盖即可。 */
+@font-face {
+    font-family: 'Material Symbols Rounded';
+    font-style: normal;
+    font-weight: 100 700;
+    font-display: block;
+    src: url('../fonts/material-symbols/material-symbols-rounded.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Mohave';
+    font-style: normal;
+    font-weight: 300 700;
+    font-display: swap;
+    src: url('../fonts/Mohave/Mohave-VariableFont_wght.ttf') format('truetype-variations'),
+         url('../fonts/Mohave/Mohave-VariableFont_wght.ttf') format('truetype');
+}
+
 :root {
     --bg-body: #0d1117;
     --bg-titlebar: #161b22;

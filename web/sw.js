@@ -1,26 +1,32 @@
-/* EsprinNemo 网页版的 Service Worker：把界面外壳装进缓存，断网也能打开这一页。
+/* EsprinNemo 网页版的 Service Worker：把界面外壳（含随包分发的字体）装进缓存，断网也能打开这一页。
 
-   只接本源的静态资源：/sync（同步接口）、/admin（管理后台）与 /health 一律放给网络 ——
+   清单里的地址一律相对：缓存键按注册作用域解析，挂根路径与子路径都成立。
+   /sync（同步接口）、/admin（管理后台）与 /health 一律放给网络 ——
    同步与鉴权不能经过缓存。导航请求走网络优先（打开页面先取新的，断网才回退到缓存），
    其余外壳资源走 stale-while-revalidate（先拿缓存立即出画面，后台再更新一份）。
 
-   界面的样式与脚本有增删后把 CACHE_NAME 的版本号 +1，旧缓存由 activate 清掉。
-   注册入口在 scripts/app.js 的 registerServiceWorker：局域网 http 下浏览器不给 Service Worker，
-   那种环境里这一份不会生效。 */
+   界面的样式、脚本或字体有增删后把 CACHE_NAME 的版本号 +1，旧缓存由 activate 清掉。
+   注册入口在 scripts/app.js 的 registerServiceWorker：file:// 与局域网 http 下浏览器不给
+   Service Worker，那种环境里这一份不会生效（界面本身不依赖它）。 */
 
-const CACHE_NAME = 'esprinnemo-web-v2';
-const HOME_URL = '/';
+const CACHE_NAME = 'esprinnemo-web-v6';
+// 首页地址按注册作用域取：根路径托管时是「/」，子路径托管时是「/xxx/」。
+// 用 sw.js 自己的地址推（注册作用域就是它所在的目录）——self.registration 在脚本求值期
+// 不一定就位，取不到会让整个 Service Worker 装不上
+const HOME_URL = new URL('./', self.location).pathname;
 
 const SHELL_ASSETS = [
     HOME_URL,
-    '/index.html',
-    '/manifest.webmanifest',
-    '/favicon.png',
-    '/icon-180.png',
-    '/icon-192.png',
-    '/icon-512.png',
-    '/icon-512-maskable.png',
-    '/styles/tokens.css',
+    'index.html',
+    'manifest.webmanifest',
+    'favicon.png',
+    'icon-180.png',
+    'icon-192.png',
+    'icon-512.png',
+    'icon-512-maskable.png',
+    'fonts/material-symbols/material-symbols-rounded.woff2',
+    'fonts/Mohave/Mohave-VariableFont_wght.ttf',
+    'styles/tokens.css',
     '/styles/base.css',
     '/styles/sidebar.css',
     '/styles/editor.css',
@@ -101,7 +107,7 @@ self.addEventListener('fetch', (event) => {
     if (request.method !== 'GET') return;
 
     const url = new URL(request.url);
-    // 跨域请求（字体 CDN）不接：离线时交给系统字体栈兜底
+    // 跨域请求（AI 服务端点等）一律放给网络，不进缓存
     if (url.origin !== self.location.origin || isBypassed(url)) return;
 
     if (request.mode === 'navigate') {

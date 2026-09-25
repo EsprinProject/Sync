@@ -21,6 +21,9 @@ const IDB_NAME = 'esprin-nemo';
 const IDB_VERSION = 1;
 const IDB_STORE = 'files';
 const LS_FILES_KEY = 'esprin.nemo.files';
+// 打开本地副本的上限：个别环境里 indexedDB.open 的回调一直不来（file:// 下的无痕式限制、
+// 隐私模式、存储被策略拦下），等下去就是静静地卡在启动那一步，到点按不可用处理
+const IDB_OPEN_TIMEOUT_MS = 2500;
 // 同步游标（已应用到第几号、日志身份、自推序号、上次同步时间）：按账户命名空间各存一份
 const SYNC_STATE_KEY = 'esprin.nemo.sync';
 
@@ -425,13 +428,29 @@ const FileStore = {
         }
         try {
             this.db = await new Promise((resolve, reject) => {
+                let settled = false;
+                const timer = setTimeout(() => {
+                    settled = true;
+                    reject(new Error(`打开超时（${IDB_OPEN_TIMEOUT_MS}ms）`));
+                }, IDB_OPEN_TIMEOUT_MS);
                 const request = indexedDB.open(this.idbName, IDB_VERSION);
                 request.onupgradeneeded = () => {
                     const db = request.result;
                     if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
                 };
-                request.onsuccess = () => resolve(request.result);
-                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                    clearTimeout(timer);
+                    // 超时之后才回来的库没人接手：关掉它，免得占着一份连接
+                    if (settled) {
+                        try { request.result.close(); } catch (error) { /* 已经用不上它了 */ }
+                        return;
+                    }
+                    resolve(request.result);
+                };
+                request.onerror = () => {
+                    clearTimeout(timer);
+                    if (!settled) reject(request.error);
+                };
             });
         } catch (error) {
             console.warn('[WARN] [Storage] IndexedDB 不可用，改用 localStorage: ' + (error && error.message));

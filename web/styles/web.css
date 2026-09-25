@@ -78,6 +78,7 @@ html.modern-layout .titlebar {
     background-color: var(--bg-body);
 }
 .gate-card {
+    position: relative;
     width: 100%;
     max-width: 400px;
     display: flex;
@@ -87,6 +88,12 @@ html.modern-layout .titlebar {
     background: var(--bg-list);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
+}
+/* 右上的关闭键：与标题栏那组图标按钮同一样式（.btn-action-icon），只定位在这里 */
+.gate-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
 }
 .gate-brand {
     font-family: 'Mohave', var(--font-sans);

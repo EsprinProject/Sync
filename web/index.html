@@ -14,38 +14,38 @@
 <!-- 浏览器界面色（Android 状态栏、独立窗口的标题栏）：首屏先给深色，scripts/app.js 随主题改写 -->
 <meta name="theme-color" content="#0d1117">
 <title>EsprinNemo</title>
-<!-- 图标字形：Material Symbols Rounded。离线部署时可把 npm 包 material-symbols 里的
-     rounded.css 与字体文件放到 fonts/material-symbols/，再把这一行的 href 换成本地路径 -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,300..600,0..1,0&display=swap">
-<!-- 品牌字（左上角应用名）：Mohave 可变字重，与桌面版同一款字体 -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mohave:wght@300..700&display=swap">
-<link rel="icon" type="image/png" href="/favicon.png">
-<!-- 安装为应用：清单（名称 / 图标 / 独立窗口）与 iOS 的主屏幕图标；离线外壳见 /sw.js -->
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/icon-180.png">
-<link rel="stylesheet" href="/styles/tokens.css">
-<link rel="stylesheet" href="/styles/base.css">
-<link rel="stylesheet" href="/styles/sidebar.css">
-<link rel="stylesheet" href="/styles/editor.css">
-<link rel="stylesheet" href="/styles/overlays.css">
-<link rel="stylesheet" href="/styles/settings.css">
-<link rel="stylesheet" href="/styles/ai.css">
-<link rel="stylesheet" href="/styles/secret.css">
+<!-- 图标字形与品牌字都随仓库分发（见 styles/tokens.css 的 @font-face）：离线打开照样有图标，
+     页面不向外请求任何资源 -->
+<link rel="icon" type="image/png" href="favicon.png">
+<!-- 本地资源一律相对引用：服务端把本页挂在根路径 / 时解析结果与绝对路径一致，
+     双击打开（file://）或换个子路径托管时也不至于取不到 -->
+<link rel="icon" type="image/png" href="favicon.png">
+<!-- 安装为应用：清单（名称 / 图标 / 独立窗口）与 iOS 的主屏幕图标；离线外壳见 sw.js -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/sidebar.css">
+<link rel="stylesheet" href="styles/editor.css">
+<link rel="stylesheet" href="styles/overlays.css">
+<link rel="stylesheet" href="styles/settings.css">
+<link rel="stylesheet" href="styles/ai.css">
+<link rel="stylesheet" href="styles/secret.css">
 <!-- Alom 风格：仅当 <html data-theme-style="alom"> 时生效 -->
-<link rel="stylesheet" href="/styles/alom.css">
+<link rel="stylesheet" href="styles/alom.css">
 <!-- 圆角尺度：按设置中的选择把 --radius-* 令牌换算成最终圆角，需排在其它风格之后 -->
-<link rel="stylesheet" href="/styles/radius.css">
+<link rel="stylesheet" href="styles/radius.css">
 <!-- 界面布局：现代布局（<html class="modern-layout">）下去掉标题栏，标签页移到工作区顶部 -->
-<link rel="stylesheet" href="/styles/mode.css">
+<link rel="stylesheet" href="styles/mode.css">
 <!-- 动效层：进场动画与换肤交叉淡入。需排在所有组件样式之后 -->
-<link rel="stylesheet" href="/styles/motion.css">
+<link rel="stylesheet" href="styles/motion.css">
 <!-- 网页版专属：同步状态入口、右侧走廊宽度与窄屏排版，排在最后 -->
-<link rel="stylesheet" href="/styles/web.css">
+<link rel="stylesheet" href="styles/web.css">
 <!-- 手机端专属：底部主导航、列表项「更多」与菜单贴底，只在窄屏生效，排在 web.css 之后 -->
-<link rel="stylesheet" href="/styles/mobile.css">
+<link rel="stylesheet" href="styles/mobile.css">
 <!-- 外观引导：首屏渲染前把主题、圆角、界面风格、布局等写成 <html> 上的类名与属性，
      避免先画一遍默认外观再切换（与桌面版 boot.js 同一职责） -->
-<script src="/scripts/boot.js"></script>
+<script src="scripts/boot.js"></script>
 </head>
 <body>
 <div class="app-container">
@@ -502,6 +502,10 @@
 <!-- 连接服务端：网页版把托管它的 EsprinSync 当存储，首次进入或登录态失效时弹这一层 -->
 <div class="gate-mask hidden" id="gate-mask">
     <div class="gate-card" role="dialog" aria-modal="true">
+        <!-- 关闭：连接层不是必过的关卡，收起它就走本地模式，要再连点顶栏那枚状态 chip -->
+        <button class="btn-action-icon gate-close" id="gate-close" type="button" title="关闭">
+            <span class="ms-icon sm">close</span>
+        </button>
         <span class="gate-brand">EsprinNemo</span>
         <h1 class="gate-title" id="gate-title">连接到服务端</h1>
         <p class="gate-desc" id="gate-desc">笔记保存在托管本页的 EsprinSync 上，需要先登录。</p>
@@ -547,16 +551,16 @@
     </div>
 </div>
 
-<script src="/scripts/markdown.js"></script>
-<script src="/scripts/store.js"></script>
-<script src="/scripts/ui.js"></script>
-<script src="/scripts/sync.js"></script>
-<script src="/scripts/notes.js"></script>
-<script src="/scripts/render.js"></script>
-<script src="/scripts/mode.js"></script>
-<script src="/scripts/ai.js"></script>
-<script src="/scripts/secret.js"></script>
-<script src="/scripts/settings.js"></script>
-<script src="/scripts/app.js"></script>
+<script src="scripts/markdown.js"></script>
+<script src="scripts/store.js"></script>
+<script src="scripts/ui.js"></script>
+<script src="scripts/sync.js"></script>
+<script src="scripts/notes.js"></script>
+<script src="scripts/render.js"></script>
+<script src="scripts/mode.js"></script>
+<script src="scripts/ai.js"></script>
+<script src="scripts/secret.js"></script>
+<script src="scripts/settings.js"></script>
+<script src="scripts/app.js"></script>
 </body>
 </html>

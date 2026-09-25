@@ -220,6 +220,7 @@ const Sync = {
 
     /* 探测服务端并确认凭据：先要一份无需授权的服务端信息，再用它判断该走登录还是填令牌；
        最后拿同步接口试一次，能读就说明凭据可用。
+       探测不到服务端（/health 404）时报回 localOnly：调用方据此按本地模式运行，不弹连接层。
        整段包在 try/catch 里：connect 一开头就把状态置成 connecting，意外抛出时若没人兜底，
        指示器会永远停在「连接中」、连接层也弹不出来（调用方的 catch 拿到的只是个被拒绝的 promise）。 */
     async connect({ reason = '启动' } = {}) {
@@ -227,9 +228,26 @@ const Sync = {
         this.connectionMessage = '';
         this.renderIndicator('busy');
 
+        // 本页不在 http(s) 上（双击打开的 file://、或在别的宿主里）：不可能由 EsprinSync 托管，
+        // 直接本地模式 —— fetch 在 file:// 下也不可用，这里不去浪费一次探测
+        if (!String(State.sync.url || '').trim() && !/^https?:$/i.test(window.location.protocol)) {
+            this.connection = 'local';
+            this.connectionMessage = '本页不由 EsprinSync 托管：没有 /health 与 /sync 接口';
+            this.renderIndicator();
+            return { ok: false, error: this.connectionMessage, needAuth: false, localOnly: true };
+        }
+
         try {
             const health = await this.apiRequest('GET', HEALTH_PATH, null, 8000);
             if (!health.ok) {
+                // /health 不存在、也没另行填地址：本页不是 EsprinSync 托管的（静态托管、本地预览），
+                // 按本地模式运行 —— 界面与本地副本照常，只是没有同步；要连服务端仍点同步状态那枚 chip
+                if (health.status === 404 && !String(State.sync.url || '').trim()) {
+                    this.connection = 'local';
+                    this.connectionMessage = '本页不由 EsprinSync 托管：没有 /health 与 /sync 接口';
+                    this.renderIndicator();
+                    return { ok: false, error: this.connectionMessage, needAuth: false, localOnly: true };
+                }
                 this.connection = 'error';
                 this.connectionMessage = health.error;
                 this.renderIndicator('error');
@@ -465,8 +483,15 @@ const Sync = {
     baseUrl() {
         const raw = String(State.sync.url || '').trim().replace(/\/+$/, '');
         if (raw) return raw;
-        // 未填地址时默认指回当前站点：网页版本身由同步服务端托管
-        return window.location.origin;
+        // 未填地址时默认指回当前站点：网页版本身由同步服务端托管。
+        // file:// 之类没有可用的源（location.origin 是字符串 "null"），同步本就不可用
+        return /^https?:$/i.test(window.location.protocol) ? window.location.origin : '';
+    },
+
+    /* 本页有没有同步这回事：只有由 EsprinSync 托管才有。本地模式（file://、外部静态托管）
+       一律没有同步入口、没有定时器，也不发任何同步请求。 */
+    supportsSync() {
+        return this.connection !== 'local';
     },
 
     async apiRequest(method, pathname, body, timeoutMs = REQUEST_TIMEOUT_MS) {

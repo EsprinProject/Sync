@@ -43,6 +43,12 @@ function setSettingsSubpageOpen(open) {
     if (view) view.classList.toggle('is-subpage', settingsSubpageOpen);
 }
 
+function categoryLabel(id, fallback) {
+    /* 分类名：本地模式（页面不由 EsprinSync 托管）里没有同步，「数据与同步」那一格就叫「数据与存储」 */
+    if (id === 'data' && !Sync.supportsSync()) return '数据与存储';
+    return fallback;
+}
+
 function renderSettingsNav() {
     const nav = document.getElementById('settings-nav');
     nav.innerHTML = '';
@@ -53,7 +59,7 @@ function renderSettingsNav() {
         entry.innerHTML = `
             <div class="nav-item-left">
                 <span class="ms-icon sm">${category.icon}</span>
-                <span>${category.label}</span>
+                <span>${categoryLabel(category.id, category.label)}</span>
             </div>
             <span class="ms-icon sm settings-nav-chevron">chevron_right</span>
         `;
@@ -91,7 +97,7 @@ function renderSettingsView() {
     const crumbIcon = document.getElementById('settings-crumb-icon');
     const crumbText = document.getElementById('settings-crumb-text');
     if (crumbIcon) crumbIcon.textContent = category.icon;
-    if (crumbText) crumbText.textContent = category.label;
+    if (crumbText) crumbText.textContent = categoryLabel(category.id, category.label);
     const crumb = document.getElementById('btn-settings-crumb');
     if (crumb) crumb.onclick = () => setSettingsSubpageOpen(false);
 
@@ -640,8 +646,8 @@ function dataPanelHTML() {
         .filter(([path]) => path.startsWith('notes/') || path.startsWith('todos/'))
         .reduce((total, [, text]) => total + utf8Bytes(text).length, 0);
 
-    return `
-        ${panelHeader('数据与同步', '本地只保留一份副本（缓存）用于离线阅读与加速启动；连接服务端后，内容的权威副本在 EsprinSync 上', 'folder')}
+    // 本地模式（页面不由 EsprinSync 托管）里没有自建同步这回事：这一整节都不排出来
+    const syncSection = Sync.supportsSync() ? `
         <div class="settings-section">
             <div class="settings-section-title">服务器与同步</div>
             <div class="settings-row is-column">
@@ -688,7 +694,13 @@ function dataPanelHTML() {
                 </div>
             </div>
         </div>
+    ` : '';
 
+    return `
+        ${panelHeader(categoryLabel('data', '数据与同步'), Sync.supportsSync()
+            ? '本地只保留一份副本（缓存）用于离线阅读与加速启动；连接服务端后，内容的权威副本在 EsprinSync 上'
+            : '笔记与待办只存在本浏览器，离线可用；导出备份可以把全部内容带走', 'folder')}
+        ${syncSection}
         <div class="settings-section">
             <div class="settings-section-title">数据与存储</div>
             <div class="settings-row is-column">
@@ -808,12 +820,15 @@ function bindDataSyncPanel() {
     const status = document.getElementById('data-sync-status');
     if (status) {
         const online = State.sync.enabled && Sync.connection === 'ready';
+        const local = Sync.connection === 'local';
         const detail = Sync.connectionMessage || Sync.lastError || '';
         status.textContent = online
             ? `已连接：${Sync.outbox.length ? `${Sync.outbox.length} 条改动待推送` : '本地与服务器已同步'}`
                 + `${State.sync.lastSyncAt ? `；上次同步 ${formatDateTime(State.sync.lastSyncAt)}` : ''}`
-            : (detail ? `未连接：${detail}` : '未连接：请先登录或填写访问令牌');
-        status.classList.toggle('is-error', !online && !!detail);
+            : local
+                ? `本地模式：${detail || '本页不由 EsprinSync 托管'}，笔记与待办只存在本浏览器`
+                : (detail ? `未连接：${detail}` : '未连接：请先登录或填写访问令牌');
+        status.classList.toggle('is-error', !online && !local && !!detail);
     }
 
     const account = document.getElementById('data-sync-account');
@@ -824,9 +839,14 @@ function bindDataSyncPanel() {
     }
 
     const url = document.getElementById('data-sync-url');
-    if (url) url.textContent = `${Sync.baseUrl()}${SYNC_PATH}`;
+    if (url) {
+        const base = Sync.baseUrl();
+        url.textContent = base ? `${base}${SYNC_PATH}` : '本页不由 EsprinSync 托管，没有同步接口';
+    }
 
     const auto = document.getElementById('data-sync-auto');
+    // 本地模式（页面不由 EsprinSync 托管）里这一节整段不排出来（见 dataPanelHTML）：到这儿就收工
+    if (!auto) return;
     const seconds = document.getElementById('data-sync-seconds');
     auto.value = State.sync.autoSync;
     const syncSecondsDisabled = () => {

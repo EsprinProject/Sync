@@ -1,6 +1,6 @@
-"""从 web/favicon.png 生成 PWA 图标。
+"""从仓库根目录的 favicon.png 生成 PWA 图标。
 
-产物（都落在 web/ 下）：
+产物（都落在仓库根目录）：
   icon-192.png            Android / 桌面安装提示用的 192px 图标
   icon-512.png            512px 图标（应用列表、启动画面）
   icon-512-maskable.png   512px 自适应图标：按源图边框色铺满画布，图形缩到 66% 居中
@@ -17,8 +17,7 @@ import struct
 import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WEB_DIR = os.path.join(ROOT, "web")
-SOURCE = os.path.join(WEB_DIR, "favicon.png")
+SOURCE = os.path.join(ROOT, "favicon.png")
 MASKABLE_SCALE = 0.66
 
 
@@ -168,11 +167,11 @@ def main():
 
     for size in (192, 512, 180):
         name = f"icon-{size}.png"
-        write_png(os.path.join(WEB_DIR, name), size, size, resize_area(width, height, rows, size, size))
+        write_png(os.path.join(ROOT, name), size, size, resize_area(width, height, rows, size, size))
         print(f"[INFO] [Icons] Written: {name} ({size}x{size})")
 
     name = "icon-512-maskable.png"
-    write_png(os.path.join(WEB_DIR, name), 512, 512, make_maskable(width, height, rows, border))
+    write_png(os.path.join(ROOT, name), 512, 512, make_maskable(width, height, rows, border))
     print(f"[INFO] [Icons] Written: {name} (512x512, maskable, scale={MASKABLE_SCALE})")
 
 

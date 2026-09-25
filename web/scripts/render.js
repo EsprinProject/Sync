@@ -808,6 +808,11 @@ function renderSyncIndicator(state) {
     const text = document.getElementById('sync-chip-text');
     if (!chip) return;
 
+    // 本地模式（本页不由 EsprinSync 托管）里没有同步这回事：整枚入口不出现
+    const local = !Sync.supportsSync();
+    chip.classList.toggle('hidden', local);
+    if (local) return;
+
     chip.classList.remove('state-online', 'state-error', 'state-busy');
 
     if (!State.sync.enabled) {

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-/* 网页版秘密本自测：web/scripts/secret.js 的加解密与信封格式。
+/* 网页版秘密本自测：Web 仓库（EsprinProject/Web）的 scripts/secret.js，服务端克隆在 web/ 下。
    信封是两端共用的契约，这里逐个用例与 node:crypto（桌面版的实现）对拆：
    本文件产出的密文交给 node 解、node 产出的密文交给本文件解，两边都必须还原出同一份正文。
 
-   运行：node secret-selftest.js（在仓库根目录） */
+   运行：node secret-selftest.js（在仓库根目录，需已克隆网页版客户端） */
 
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -52,6 +52,12 @@ const EXPORTS = [
     'serializeSecretBody', 'isSecretLocked', 'isSecretHidden', 'secretStateLabel',
     'SECRET_ITERATIONS', 'SECRET_ENVELOPE_HEAD', 'secretUnlocked'
 ];
+
+// 网页版脚本来自 Web 仓库：本地没克隆就没得测，直接报出缺的是哪一份文件
+if (!fs.existsSync(SECRET_JS)) {
+    log('ERROR', 'Selftest', `找不到网页版脚本，先把 Web 仓库克隆到 web/ (path=${SECRET_JS})`);
+    process.exit(1);
+}
 
 const source = fs.readFileSync(SECRET_JS, 'utf8');
 vm.runInThisContext(`${source}\nglobalThis.__secret = { ${EXPORTS.join(', ')} };`, { filename: SECRET_JS });
