@@ -1111,6 +1111,19 @@ class Journal:
 MANAGER_DIR_NAME = "manager"
 WEB_DIR_NAME = "web"
 INDEX_NAME = "index.html"
+# 判定 web/ 是否算一份可用的客户端：缺任意一项都算不完整。
+# 页面在、图标字体不在的那类拷贝照样打开，只是所有图标退化成字形名文字，比整个目录缺失更难发现，
+# 因此和「没有页面」一并纳入启动检查
+WEB_REQUIRED_ASSETS = (
+    INDEX_NAME,
+    "styles/tokens.css",
+    "scripts/app.js",
+    "scripts/store.js",
+    "manifest.webmanifest",
+    "sw.js",
+    "fonts/material-symbols/material-symbols-rounded.woff2",
+    "fonts/Mohave/Mohave-VariableFont_wght.ttf",
+)
 ASSET_CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -1170,17 +1183,27 @@ def read_web_index():
                            WEB_MISSING_HINT.format(repo=WEB_REPO_URL, ref=WEB_REPO_REF))
 
 
+def missing_web_assets():
+    """web/ 里缺的关键资源（相对路径）。空列表表示这份客户端可用。"""
+    root = web_dir()
+    return [rel for rel in WEB_REQUIRED_ASSETS if not os.path.isfile(os.path.join(root, rel))]
+
+
 def web_client_ready():
     return os.path.isfile(os.path.join(web_dir(), INDEX_NAME))
 
 
 def web_client_state():
-    """web/ 的来路：clone（带页面的一份克隆）/ files（有页面但不是仓库）/ missing（没有页面）。
+    """web/ 的来路：clone（带页面的一份克隆）/ files（有页面但不是仓库）/
+    partial（页面在、关键资源不全）/ missing（没有页面）。
 
     没有页面就算 missing：半份克隆（.git 在、页面不在）也归到这里，好让启动时重新克隆。
+    partial 单独列出：这类拷贝页面照常打开，只是图标字体之类不在，启动时按清单补齐或整份换掉。
     """
     if not web_client_ready():
         return "missing"
+    if missing_web_assets():
+        return "partial"
     return "clone" if os.path.isdir(os.path.join(web_dir(), ".git")) else "files"
 
 
@@ -1221,19 +1244,38 @@ def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clo
     """让网页版客户端就位：web/ 里没有页面就从 Web 仓库克隆，update 时再 ff-only 拉一次。
 
     没有 git、克隆失败、拉取失败都只记日志：服务端其余部分照常运行，根路径返回一页说明。
+    页面在而关键资源不全（旧快照、拷贝漏了字体）按缺页面处理：先就地还原，还原不了整份换掉。
     """
     root = web_dir()
     state = web_client_state()
     cloned = False
+    restored = False
 
     if state == "files":
         # 目录里的页面不是克隆来的（手工放的），原样使用，也没有可拉的上游
         log("WARN", "Web", "dir is not a clone, served as is (dir={})".format(root))
         return
 
-    if state == "missing":
+    if state == "partial":
+        # 克隆里本来就该有这些文件：先就地还原，省一次整份克隆
+        if os.path.isdir(os.path.join(root, ".git")):
+            ok, detail = run_git(["checkout", "--", "."], cwd=root)
+            missing = missing_web_assets()
+            restored = ok and not missing
+            if restored:
+                log("INFO", "Web", "restored from clone dir={}".format(root))
+            else:
+                log("ERROR", "Web", "restore failed: missing={} ok={} detail={}".format(
+                    ",".join(missing), ok, detail))
+        if not restored:
+            # 没有可还原的上游（手工拷贝的旧快照，或克隆里本身也缺）：交给下面的整份克隆
+            log("WARN", "Web", "incomplete client: missing={} dir={}".format(
+                ",".join(missing_web_assets()), root))
+
+    if state in ("missing", "partial") and not restored:
         if not clone:
-            log("WARN", "Web", "clone skipped: no index (dir={} flag=--no-web-clone)".format(root))
+            log("WARN", "Web", "clone skipped: state={} missing={} dir={} flag=--no-web-clone".format(
+                state, ",".join(missing_web_assets()) or "-", root))
             return
         # 克隆要求目标不存在或是空的，而 web/ 下可能留着手工放的零散文件：
         # 先克隆到旁边的临时目录，成了再整体换过去（失败时原地那份一个字节不动）
@@ -1252,15 +1294,19 @@ def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clo
             log("ERROR", "Web", "swap failed: dir={} detail={}".format(root, error))
             return
         cloned = True
-        log("INFO", "Web", "clone done repo={} ref={} dir={}".format(repo_url, ref, root))
+        missing = missing_web_assets()
+        log("INFO", "Web", "clone done repo={} ref={} dir={} missing={}".format(
+            repo_url, ref, root, ",".join(missing) or "-"))
 
     if not update or cloned:
         return
     ok, detail = run_git(["pull", "--ff-only"], cwd=root)
-    if ok:
-        log("INFO", "Web", "pull done repo={} ref={}".format(repo_url, ref))
-    else:
+    if not ok:
         log("ERROR", "Web", "pull failed: dir={} detail={}".format(root, detail))
+        return
+    missing = missing_web_assets()
+    log("WARN" if missing else "INFO", "Web", "pull done repo={} ref={} missing={}".format(
+        repo_url, ref, ",".join(missing) or "-"))
 
 
 class ApiHandler(BaseHTTPRequestHandler):
@@ -2064,6 +2110,9 @@ def selftest():
         if not web_client_ready():
             log("WARN", "Selftest", "网页版客户端不在 web/ 下，跳过这一节 (dir={})".format(web_dir()))
         else:
+            check("网页版客户端关键资源齐全（缺图标字体时图标会退化成字形名文字）",
+                  not missing_web_assets(), ",".join(missing_web_assets()) or "-")
+
             status, page = get("/", token=None)
             check("根路径返回网页版客户端", status == 200 and "EsprinNemo" in page.get("_raw", ""), repr(page)[:160])
 
@@ -2662,8 +2711,9 @@ def main(argv=None):
     log("INFO", "Sync", "endpoint={}/* origin=http://{}:{}".format(SYNC_PATH, url_host, bound_port))
     log("INFO", "Storage", "journal={} journalId={} ops={} latestSeq={}".format(
         journal.path, journal.journal_id, journal.count, journal.latest_seq))
-    log("INFO", "Web", "endpoint=/ dir={} index={} source={} repo={} ref={}".format(
-        web_dir(), web_client_ready(), web_client_state(), args.web_repo, args.web_ref))
+    log("INFO", "Web", "endpoint=/ dir={} index={} source={} missing={} repo={} ref={}".format(
+        web_dir(), web_client_ready(), web_client_state(),
+        ",".join(missing_web_assets()) or "-", args.web_repo, args.web_ref))
     log("INFO", "Admin", "endpoint={} dir={} api={} passwordSet={}".format(
         ADMIN_PATH, manager_dir(), API_PREFIX, users.password_set()))
     log("INFO", "Auth", "tokenSource={} accountCount={} tokenCount={}".format(
