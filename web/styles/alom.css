@@ -1,0 +1,209 @@
+/* Alom 风格（阴影风格）：以柔和的投影与层次感为核心，覆盖 tokens.css 中的设计令牌，
+   让卡片、浮层、标题栏与控件靠阴影与半透明材质拉开层次，同时放大圆角。
+
+   启用方式：设置页「外观 → 主题 → 界面风格」写入 <html data-theme-style="alom">。
+   未选择该风格时本文件不匹配任何选择器，对界面零影响——即默认的 GitHub 风格保持不变。
+   本文件与桌面版 EsprinNemo 的 styles/alom.css 逐条对应。 */
+
+/* ===== 深色（默认即深色，无需额外类名） ===== */
+:root[data-theme-style="alom"] {
+    --bg-body: #1c1c1e;
+    --bg-titlebar: #2c2c2e;
+    --bg-sidebar: #1c1c1e;
+    --bg-list: #2c2c2e;
+    --bg-editor: #1c1c1e;
+    --bg-elevated: #3a3a3c;
+    --border-color: #38383a;
+    --border-light: rgba(255, 255, 255, 0.1);
+
+    --text-primary: #f5f5f7;
+    --text-secondary: #98989d;
+    --text-muted: #6e6e73;
+
+    --accent: #0a84ff;
+    --accent-bg: rgba(10, 132, 255, 0.18);
+    --danger: #ff453a;
+    --danger-bg: rgba(255, 69, 58, 0.16);
+    --warning: #ffd60a;
+
+    --item-hover: rgba(255, 255, 255, 0.06);
+    --item-active: rgba(255, 255, 255, 0.12);
+
+    /* 圆角基础值整体放大一档（最终值仍由 styles/radius.css 按用户选择的尺度换算） */
+    --radius-base-sm: 8px;
+    --radius-base-md: 12px;
+
+    /* 字体不做任何覆盖：与默认风格共用 tokens.css 的字体栈 */
+}
+
+/* ===== 浅色 ===== */
+:root.light[data-theme-style="alom"] {
+    --bg-body: #ffffff;
+    --bg-titlebar: #f5f5f7;
+    --bg-sidebar: #f2f2f7;
+    --bg-list: #ffffff;
+    --bg-editor: #ffffff;
+    --bg-elevated: #ffffff;
+    --border-color: #d8d8dc;
+    --border-light: rgba(0, 0, 0, 0.07);
+
+    --text-primary: #1d1d1f;
+    --text-secondary: #6e6e73;
+    --text-muted: #8e8e93;
+
+    --accent: #007aff;
+    --accent-bg: rgba(0, 122, 255, 0.12);
+    --danger: #ff3b30;
+    --danger-bg: rgba(255, 59, 48, 0.12);
+    --warning: #b25000;
+
+    --item-hover: rgba(0, 0, 0, 0.05);
+    --item-active: rgba(0, 0, 0, 0.09);
+}
+
+/* ===== 标题栏与侧边栏：半透明材质 + 发丝分隔线 =====
+   标题栏材质只属于经典布局：现代布局里标题栏整条被撤掉，只剩「右上角悬浮按钮组」
+   的定位容器（背景透明、pointer-events: none），照旧刷上材质会在窗口顶部压出一条
+   40px 高的毛玻璃，盖住同样 40px 高的编辑器顶栏与笔记列表顶行。 */
+:root[data-theme-style="alom"]:not(.modern-layout) .titlebar {
+    background-color: rgba(44, 44, 46, 0.86);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--border-light);
+}
+:root.light[data-theme-style="alom"]:not(.modern-layout) .titlebar {
+    background-color: rgba(246, 246, 248, 0.86);
+}
+
+:root[data-theme-style="alom"] .sidebar,
+:root[data-theme-style="alom"] .settings-sidebar {
+    background-color: rgba(30, 30, 32, 0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-right: 1px solid var(--border-light);
+}
+:root.light[data-theme-style="alom"] .sidebar,
+:root.light[data-theme-style="alom"] .settings-sidebar {
+    background-color: rgba(242, 242, 247, 0.78);
+}
+
+/* 侧边栏选中项：整行填充强调色 */
+:root[data-theme-style="alom"] .nav-item.active {
+    background-color: var(--accent);
+    color: #ffffff;
+}
+:root[data-theme-style="alom"] .nav-item.active .nav-badge {
+    background-color: rgba(255, 255, 255, 0.24);
+    color: #ffffff;
+}
+:root[data-theme-style="alom"] .nav-item.active .ms-icon {
+    font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+}
+
+/* 标签页：胶囊造型，当前页给一层浅底与细阴影 */
+:root[data-theme-style="alom"] .tab-item {
+    border-radius: var(--radius-pill);
+    padding: 0 12px;
+}
+:root[data-theme-style="alom"] .tab-item.active {
+    background-color: var(--bg-list);
+    border-color: transparent;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+}
+:root.light[data-theme-style="alom"] .tab-item.active {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+:root[data-theme-style="alom"] .tab-item.is-dragging {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+:root.light[data-theme-style="alom"] .tab-item.is-dragging {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* ===== 卡片类容器：去硬边框，改用柔和投影 ===== */
+:root[data-theme-style="alom"] .settings-row,
+:root[data-theme-style="alom"] .accent-custom,
+:root[data-theme-style="alom"] .accent-preview,
+:root[data-theme-style="alom"] .font-preview,
+:root[data-theme-style="alom"] .settings-path {
+    border-color: transparent;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+:root.light[data-theme-style="alom"] .settings-row,
+:root.light[data-theme-style="alom"] .accent-custom,
+:root.light[data-theme-style="alom"] .accent-preview,
+:root.light[data-theme-style="alom"] .font-preview,
+:root.light[data-theme-style="alom"] .settings-path {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* 浮层：右键菜单、自绘下拉菜单、Toast 与 AI 面板用同一套材质 */
+:root[data-theme-style="alom"] .context-menu,
+:root[data-theme-style="alom"] .dropdown-menu,
+:root[data-theme-style="alom"] .toast-item,
+:root[data-theme-style="alom"] .ai-panel {
+    background-color: rgba(44, 44, 46, 0.92);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-color: var(--border-light);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.36);
+}
+:root.light[data-theme-style="alom"] .context-menu,
+:root.light[data-theme-style="alom"] .dropdown-menu,
+:root.light[data-theme-style="alom"] .toast-item,
+:root.light[data-theme-style="alom"] .ai-panel {
+    background-color: rgba(250, 250, 252, 0.92);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+}
+
+/* ===== 控件 ===== */
+:root[data-theme-style="alom"] .switch {
+    width: 46px;
+    height: 26px;
+}
+:root[data-theme-style="alom"] .slider:before {
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+:root[data-theme-style="alom"] input:checked + .slider:before {
+    transform: translateX(20px);
+}
+
+:root[data-theme-style="alom"] .settings-select,
+:root[data-theme-style="alom"] .accent-hex-input,
+:root[data-theme-style="alom"] .select-folder,
+:root[data-theme-style="alom"] .dialog-input {
+    border-radius: var(--radius-sm);
+}
+:root[data-theme-style="alom"] .settings-select:hover,
+:root[data-theme-style="alom"] .accent-hex-input:hover {
+    border-color: var(--border-color);
+}
+:root[data-theme-style="alom"] .settings-select:focus,
+:root[data-theme-style="alom"] .accent-hex-input:focus,
+:root[data-theme-style="alom"] .dialog-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+:root[data-theme-style="alom"] .btn-sidebar-new,
+:root[data-theme-style="alom"] .settings-btn.primary {
+    border-radius: var(--radius-sm);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-theme-style="alom"] ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+:root[data-theme-style="alom"] ::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+:root[data-theme-style="alom"] :hover::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.24);
+}
+:root.light[data-theme-style="alom"] :hover::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.22);
+}

@@ -1,0 +1,46 @@
+/* 圆角尺度：设置页「外观 → 界面」的四个档位——方（直角）/ 微圆角 / 默认 / 大。
+
+   用户在设置页选择的尺度写在 <html data-radius="..."> 上，本文件据此把圆角令牌换算成最终像素：
+
+   - 各主题风格的基础圆角由 --radius-base-sm / --radius-base-md 提供（默认风格见 tokens.css，
+     Alom 见 alom.css），本文件只负责按尺度缩放，因此切换主题风格后尺度依然生效；
+   - --radius-xs 用于代码片段、缩略图、文件夹徽标等小元素；
+   - --radius-pill 用于胶囊造型元素（标签、开关滑轨、标签页、进度条、滚动条）：
+     默认与大两档保持完全圆头，方与微圆角两档把它收回为小圆角；
+   - --radius-knob 用于开关滑块。
+
+   本文件在各风格样式表之后加载，只声明令牌本身，不绑定任何具体选择器。 */
+:root {
+    /* 尺度系数：方 0 / 微圆角 0.5 / 默认 1 / 大 1.5 */
+    --radius-factor: 1;
+
+    --radius-xs: 4px;
+    --radius-sm: calc(var(--radius-base-sm, 6px) * var(--radius-factor));
+    --radius-md: calc(var(--radius-base-md, 8px) * var(--radius-factor));
+    --radius-pill: 999px;
+    --radius-knob: 50%;
+}
+
+/* 方：全部直角 */
+:root[data-radius="square"] {
+    --radius-factor: 0;
+    --radius-xs: 0px;
+    --radius-pill: 0px;
+    --radius-knob: 0px;
+}
+
+/* 微圆角：只留一点圆润 */
+:root[data-radius="slight"] {
+    --radius-factor: 0.5;
+    --radius-xs: 2px;
+    --radius-pill: 4px;
+    --radius-knob: 3px;
+}
+
+/* 默认：tokens.css / alom.css 提供的基础圆角原样使用（即上面 :root 里的系数 1） */
+
+/* 大：基础圆角放大一半 */
+:root[data-radius="large"] {
+    --radius-factor: 1.5;
+    --radius-xs: 6px;
+}

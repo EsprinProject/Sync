@@ -1,0 +1,724 @@
+/* 手机端专属界面：底部主导航、列表表头的筛选、顶栏右端的菜单、列表项「更多」与长按菜单、
+   菜单贴底、编辑器进退场、设置页的两级、虚拟键盘让位。
+   只在小屏（≤860px，与 styles/web.css 的档位一致）生效，桌面端的排版与交互一条不动。
+   结构侧的配合：底部导航、筛选键与「更多」按钮由 scripts/render.js 渲染，菜单与键盘见 scripts/app.js。 */
+
+/* 桌面端不排出来 */
+.mobile-tabbar,
+.mobile-sheet-mask,
+.mobile-ai-mask,
+.mobile-menu-toggle,
+.list-filter-toggle,
+.note-card-more,
+.editor-back,
+.editor-ai,
+.settings-crumb,
+.settings-nav-title,
+.settings-nav-chevron {
+    display: none;
+}
+
+@media (max-width: 860px) {
+    /* 屏底留白：底栏与编辑器底栏共用同一个值（安全区由 .app-container 另外让开），
+       图标、文字与统计都不贴着屏底，屏幕圆角与手势条碰不到它们 */
+    html {
+        --mobile-bottom-gap: 14px;
+    }
+
+    /* ---------------- 1. 底部主导航 ----------------
+       列表视图的主切换（笔记 / 待办 / 置顶 / 废纸篓）与中间的「新建」，
+       拇指不必再去够列表顶部。工作区、设置页与 AI 面板铺开时各自盖住它。 */
+    .mobile-tabbar {
+        display: flex;
+        flex-shrink: 0;
+        align-items: stretch;
+        gap: 2px;
+        /* 底部安全区由 .app-container 统一让开（见 styles/web.css），这里不再重复计算，
+           只叠一道屏底留白（--mobile-bottom-gap）。
+           面板绝对定位在它上沿，因此这一层要留成定位参考系并抬到遮罩之上 */
+        position: relative;
+        z-index: 291;
+        padding: 4px 6px var(--mobile-bottom-gap) 6px;
+        background: var(--bg-titlebar);
+        border-top: 1px solid var(--border-color);
+        /* 进退场：整条往下滑出屏幕，同时把占位一起收掉（负外边距等于实测高度，见
+           scripts/app.js 的 observeTabbarHeight）—— 只做位移的话会在屏底留下一块空档 */
+        transition: transform var(--motion-base) var(--ease-out),
+                    margin-bottom var(--motion-base) var(--ease-out);
+    }
+    /* 几种「底栏让位」的情形，统一走上面那两条过渡：
+       · 设置页铺开（它自己带「返回」）；
+       · 搜索期间 —— 输入框聚焦时软键盘通常已经让底栏让开了，这一条兜住键盘高度没被
+         报上来的情形；输入框里已有内容时也收起（:placeholder-shown 判空，标记里那个
+         placeholder 不能删，删了这条就永远匹配不到）；
+       · AI 面板铺开（面板占着屏底，免得底栏从它下沿露出一截）；
+       · 软键盘弹起（底栏正好压在键盘下面）。 */
+    .app-container:has(#settings-view:not(.hidden)) .mobile-tabbar,
+    html:has(#input-search:focus) .mobile-tabbar,
+    html:has(#input-search:not(:placeholder-shown)) .mobile-tabbar,
+    .app-container:has(.ai-panel:not(.hidden)) .mobile-tabbar,
+    html.keyboard-open .mobile-tabbar {
+        /* 多让出一道屏底安全区：底栏的静态底边本来就落在安全区之上，只让 100%
+           的话圆角屏底部还会露出一条 */
+        transform: translateY(calc(100% + env(safe-area-inset-bottom)));
+        margin-bottom: calc(-1 * var(--mobile-tabbar-height, 0px));
+    }
+    .mobile-tab {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        min-width: 0;
+        padding: 4px 2px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 11px;
+        line-height: 1.2;
+        /* 松开后那层浅底渐隐；图标与文字同色，切换页时的「灰 → 主题色」也一起渐变
+           （进入与离开可以给两条不同的时长：过渡属性取的是「变化后」那一侧的值，
+           所以按下那一下在 :active 里把底色那条改成 0s） */
+        transition: background-color var(--motion-slow) var(--ease-out),
+                    color var(--motion-base) var(--ease-out);
+    }
+    .mobile-tab .ms-icon {
+        font-size: 22px;
+    }
+    .mobile-tab:active {
+        background: var(--item-hover);
+        /* 按下当场亮起；颜色那条仍按基础规则里的时长渐变 */
+        transition: background-color 0s, color var(--motion-base) var(--ease-out);
+    }
+    .mobile-tab.active {
+        color: var(--accent);
+    }
+    /* 中间的「新建」：占一格，本体收成圆形主题色按钮。
+       圆底（.fab-circle）与字形（.ms-icon）分两层：换图标（新建 ⇄ 清空）时只淡字形，圆底一点不动；
+       按下变暗则给圆底那一层，透明度会一并作用到里面的字形上（与原来同一个观感） */
+    .mobile-tab-new {
+        flex: 0 0 62px;
+    }
+    .mobile-tab-new .fab-circle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 42px;
+        border-radius: var(--radius-pill);
+        background: var(--accent);
+        transition: opacity var(--motion-slow) var(--ease-out);
+    }
+    .mobile-tab-new:active .fab-circle {
+        opacity: 0.85;
+        transition: opacity 0s;
+    }
+    .mobile-tab-new .fab-circle .ms-icon {
+        font-size: 24px;
+        color: var(--accent-fg);
+        /* 位移动画用于展开时把「+」转成叉（见第 1.5 节，走 --motion-base）；
+           透明度只服务换图标时的淡入淡出，走最快那一档（与 scripts/render.js 的
+           FAB_ICON_FADE_MS 成对改，两边都是 0.12s） */
+        transition: transform var(--motion-base) var(--ease-standard),
+                    opacity var(--motion-fast) var(--ease-out);
+    }
+    /* 换字形（新建 ⇄ 清空，见 scripts/render.js 的 applyMobileFabMode）：
+       挂上这个类先把字形淡掉，换完再摘掉、淡回来 —— 直接改 textContent 会「啪」地跳一下。
+       只淡字形这一层，外面的圆底不受影响 */
+    .mobile-tab-new.icon-fading .fab-circle .ms-icon {
+        opacity: 0;
+    }
+
+    /* ---------------- 1.5 底栏上沿的面板：往上滑开 ----------------
+       按下中间那枚后，底栏上沿长出一块面板（高度过渡 + 内容上移），
+       其余画面压一层深色遮罩，点遮罩收回（见 scripts/app.js 的 setMobileSheetOpen）。
+       两张面板共用这一套位置与时长，按当前筛选只排出一张：平时是「新建」二选一，
+       切到废纸篓时换成「清空废纸篓 / 取消」的确认（见 scripts/render.js 的 renderCounts）。
+       遮罩常驻但默认不显形，靠 opacity 过渡淡入淡出：用 display 切换会「啪」地消失，
+       与面板的 0.26s 高度过渡同时开始同时结束。 */
+    /* 遮罩压在 289：条目菜单（290）要夹在它和底栏（291）之间，见第 3 节 */
+    .mobile-sheet-mask {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 289;
+        background: rgba(0, 0, 0, 0.45);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--motion-slow) var(--ease-out);
+    }
+    /* 展开态由底栏上的类名决定（遮罩在 DOM 里排在底栏之前，只能从外层 :has 往下找） */
+    .app-container:has(.mobile-tabbar.sheet-open) .mobile-sheet-mask {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    /* 换面板只切 display，不参与过渡：两张面板占的是同一块位置，来回切时看不出接缝 */
+    .mobile-tabbar.trash-mode .mobile-sheet:not(.mobile-sheet-trash),
+    .mobile-tabbar:not(.trash-mode) .mobile-sheet-trash {
+        display: none;
+    }
+    .mobile-sheet {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 100%;
+        height: 0;
+        overflow: hidden;
+        background: var(--bg-list);
+        transition: height var(--motion-slow) var(--ease-out);
+    }
+    .mobile-sheet-inner {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 6px;
+        /* 面板展开时这一层从下往上归位，与高度过渡一起构成「滑开」 */
+        transform: translateY(100%);
+        transition: transform var(--motion-slow) var(--ease-out);
+    }
+    .mobile-tabbar.sheet-open .mobile-sheet {
+        /* 两枚 52px 的行 + 6px 间距 + 上下各 6px 内边距 */
+        height: 122px;
+        border-bottom: 1px solid var(--border-light);
+    }
+    .mobile-tabbar.sheet-open .mobile-sheet-inner {
+        transform: none;
+    }
+    .mobile-sheet-option {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 52px;
+        flex-shrink: 0;
+        padding: 0 14px;
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 15px;
+    }
+    .mobile-sheet-option .ms-icon {
+        font-size: 22px;
+        color: var(--accent);
+    }
+    /* 破坏性的一枚（清空废纸篓）换成告警色，与新建那两枚区分开 */
+    .mobile-sheet-option.is-danger,
+    .mobile-sheet-option.is-danger .ms-icon {
+        color: var(--danger);
+    }
+    .mobile-sheet-option:active {
+        background: var(--item-active);
+    }
+    /* 展开时那枚「新建」转成叉，一眼能看出再按一次会收回；
+       废纸篓下那枚是垃圾桶图标，转 45° 表达不了任何意思，不加这段
+       （这条转的是字形那一层，圆底不动；transition 写在 `.fab-circle .ms-icon` 那条基础规则里） */
+    .mobile-tabbar.sheet-open:not(.trash-mode) .mobile-tab-new .ms-icon {
+        transform: rotate(45deg);
+    }
+
+    /* ---------------- 1.6 编辑器顶栏的两枚入口 ----------------
+       左端是返回（窄屏不用标签栏左端那枚「回到首页」，位置也在够不到的左上角），
+       右端是 AI 助手（工作区整屏铺开时盖住了右上角那组悬浮按钮，行内够不到）；
+       工作区上方为那枚返回留的一行白也随之省下。 */
+    html .app-body .tabs-back {
+        display: none;
+    }
+    html.modern-layout .app-body > .workspace:has(#editor-topbar:not(.hidden)) {
+        padding-top: env(safe-area-inset-top);
+    }
+    /* 「禁用标签页」在窄屏没有意义（标签栏本来就整条收起）：把 mode.css 给它留的
+       返回格与右侧走廊一起撤掉，顶栏恢复成左右各 8px */
+    html.modern-layout.tabs-disabled .editor-topbar {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    .editor-back,
+    .editor-ai {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+    }
+    .editor-back:active,
+    .editor-ai:active {
+        background: var(--item-active);
+        color: var(--text-primary);
+    }
+    /* AI 面板开着时顶栏那两枚不点亮（用户要求「手机端顶部的AI按钮不要有激活状态」，
+       随后又要求「按下不要强调色」）：ai.css 的 .btn-action-icon.active 把图标染成强调色、
+       底下铺一层 --accent-bg。窄屏的面板是贴底悬浮的卡片，顶栏整条仍在它上方露着
+       （编辑器里尤其明显），那枚亮着就成了一个没有对应容器的选中项。
+       常态与按下两条要一起压：只压常态（把按下让回给 .active）的话，按下去那一下
+       反而会闪出强调色。按下反馈改成一层中性浅底，与同一排的返回键一致。
+       桌面端照旧点亮。 */
+    html .editor-ai.active,
+    html .titlebar-actions #btn-ai-assistant.active {
+        color: var(--text-secondary);
+        background-color: transparent;
+    }
+    html .editor-ai.active:active,
+    html .titlebar-actions #btn-ai-assistant.active:active {
+        color: var(--text-primary);
+        background-color: var(--item-active);
+    }
+
+    /* ---------------- 工作区（编辑器）的进退场 ----------------
+       窄屏下编辑器是整屏盖在列表上的一层（见 styles/web.css 第 2.4 节）。关掉时不再 display: none，
+       改成留在渲染树里往右侧让开 —— 只有位移补得出「滑进 / 滑出屏幕」这一段。
+       两态各写自己的过渡，位移那一条两边一样，只有 visibility 要区别对待：
+       进入时要当帧显形（0s、不拖），退出时则要拖到滑完（0s 延时 --motion-base）再隐身。
+       关着时的定位（fixed / inset / z-index）原本由下面那条 :has() 规则提供，它此刻不成立，因此在这里再写一遍。 */
+    .app-body > .workspace {
+        display: flex;
+        position: fixed;
+        inset: 0;
+        z-index: 340;
+        transform: translateX(100%);
+        visibility: hidden;
+        transition: transform var(--motion-base) var(--ease-out),
+                    visibility 0s var(--motion-base);
+    }
+    .app-body > .workspace:has(#editor-topbar:not(.hidden)) {
+        transform: none;
+        visibility: visible;
+        transition: transform var(--motion-base) var(--ease-out),
+                    visibility 0s;
+    }
+    /* 返回列表：只把目标值改成屏幕之外，位移本身用的还是上面那条过渡。
+       选择器里的 :has() 是为了压住上面那条的 transform: none（:has() 的权重取它最具体的那一项）。
+       滑出期间顶栏与正文各段保持原样 —— 由 scripts/render.js 的 renderWorkspace 跳过收起，
+       见 scripts/app.js 的 beginEditorLeave */
+    html.editor-leaving .app-body > .workspace:has(#editor-topbar:not(.hidden)) {
+        transform: translateX(100%);
+    }
+
+    /* ---------------- 1.7 AI 助手：悬浮在屏幕下半部 ----------------
+       这里覆盖 styles/web.css 第 2.6 节那份「从右侧整屏铺开」：手机上对话面板改成
+       贴底悬浮的卡片（占屏高四分之三、离屏底一厘米），编辑器上半部分仍看得见，
+       也不再压住整块工作区。收起时从下方退出（原样式是向右滑出），过渡仍用 web.css 给的 transform。 */
+    .ai-panel,
+    .ai-panel.ai-collapsed {
+        top: auto;
+        left: 8px;
+        right: 8px;
+        /* 离屏底一厘米；软键盘弹起时再整体抬起（见 scripts/app.js 的 bindKeyboardInset） */
+        bottom: calc(1cm + var(--keyboard-inset, 0px));
+        width: auto;
+        /* 高度占屏高四分之三；键盘顶上来时不许超过「屏高 - 底距 - 键盘 - 顶部留白」，
+           否则面板顶（含关闭键）会被顶出屏幕 */
+        height: 75vh;
+        height: 75dvh;
+        max-height: calc(100dvh - 1cm - var(--keyboard-inset, 0px) - 8px);
+        padding-top: 0;
+        padding-bottom: 0;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+        /* 下滑是一段大位移，交给合成层，减少掉帧 */
+        will-change: transform;
+        transform: translateY(100%);
+    }
+    /* 面板以外压一层深色遮罩：点它关闭面板（面板自己 360，遮罩 359，见 scripts/app.js）。
+       常驻但默认不显形，靠 opacity 过渡淡入淡出 —— 用 display 切换会「啪」地消失；
+       时机与面板一致：展开态淡入，一挂 .ai-collapsed 就开始淡出（正好与下滑同时进行） */
+    .mobile-ai-mask {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 359;
+        background: rgba(0, 0, 0, 0.45);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--motion-slow) var(--ease-out);
+    }
+    .app-container:has(.ai-panel:not(.hidden):not(.ai-collapsed)) .mobile-ai-mask {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    /* 自绘下拉与右键菜单挂在 <body> 上，只有 335：面板改成悬浮层（360）后它们会被盖住，
+       看上去就是「下拉打不开」。抬到面板之上，仍在提示条（400）与弹窗（500）之下；
+       条目菜单例外，它贴在底栏上，要待在底栏之下（见第 3 节） */
+    .dropdown-menu,
+    .context-menu {
+        z-index: 370;
+    }
+    /* 输入框正文收小：窄屏原为 16px（那道线是为了防 iOS 聚焦时自动放大整页），
+       这里按需让步 —— 桌面 12.5px、手机 14px；若在 iOS 上遇到聚焦后页面被放大，删掉这条即可 */
+    .ai-input {
+        font-size: 14px;
+    }
+    /* 「附带当前笔记」那枚触发器：触摸档把 .ai-scope-select 也归进了 16px 的输入控件名单，
+       在 AI 输入区里明显偏大，收回与桌面下拉、面板其余文字一致的档位（菜单项本就是 12.5px） */
+    .ai-composer-bar .ai-scope-select {
+        font-size: 12.5px;
+    }
+
+    /* ---------------- 1.8 列表表头：搜索框与「筛选」 ----------------
+       触摸档把 .search-box input 也归进了 16px 的输入控件名单（防 iOS 聚焦时放大整页），
+       在手机列表表头里明显偏大：收到与桌面（12px）接近、略大一点的一档。
+       同样地，若在 iOS 上聚焦后被放大，删掉这条即可。 */
+    .search-box input {
+        font-size: 13px;
+    }
+    /* 搜索框内的「筛选」：手机端没有侧边栏，文件夹与标签过滤就这一处入口
+       （四个主入口不在这里 —— 它们在底部主导航里）。
+       排在搜索框内部右端、与清除 × 并列，尺寸跟着框内那两枚图标走：字形 16px，
+       按下时那层浅底只比字形大 3px（框高 28px，再大就顶满整格、显得笨）；
+       右外侧用负外边距吃掉框自身那 8px 内边距的一半，让它再靠右一点、与左侧那枚搜索图标大致对称。
+       颜色与框内另外两枚同档（--text-muted）；当前筛选落在文件夹 / 标签上时点亮成主题色，
+       .active 由 render.js 的 renderCounts 同步 */
+    .list-filter-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
+        margin-right: -4px;
+        border-radius: var(--radius-sm);
+        color: var(--text-muted);
+    }
+    .list-filter-toggle:active {
+        background: var(--item-active);
+        color: var(--text-primary);
+    }
+    .list-filter-toggle.active {
+        color: var(--accent);
+    }
+
+    /* ---------------- 1.9 顶栏：应用名、工具按钮与右端菜单 ----------------
+       手机端没有侧边栏，顶栏就承担了两件桌面端归侧边栏的事：分类筛选在列表表头那一枚里
+       （见 §1.8），深浅色、设置与导入文件收在顶栏最右那枚菜单里（见 scripts/app.js）。
+       现代布局下标题栏整条被撤掉、只剩右上角悬浮按钮组的定位容器，这里把它重新摊开成一条顶栏；
+       经典布局下这一条本就在，只是按钮组也得自己靠右。 */
+    .titlebar-actions {
+        /* 经典布局下与它并列的是可伸缩的标签栏；窄屏标签栏整条收起，按钮组得自己靠右 */
+        margin-left: auto;
+    }
+    /* 全屏：手机浏览器里点不动（iOS Safari 至今没有全屏 API，只能靠「添加到主屏幕」全屏运行），
+       这枚在顶栏占一格却办不成事，窄屏直接收掉 */
+    #btn-fullscreen {
+        display: none;
+    }
+    /* 深浅色：这一枚在窄屏收掉，改从右端菜单里选（同一个 toggleTheme） */
+    #btn-theme-toggle {
+        display: none;
+    }
+    .mobile-menu-toggle {
+        /* 现代布局下标题栏空白处是 pointer-events: none（整条拖动区会吞掉下面的鼠标事件），
+           这枚要自己把点击收回来 */
+        pointer-events: auto;
+    }
+    .titlebar-brand {
+        display: inline-flex;
+        align-items: center;
+        height: 32px;
+        padding: 0 6px;
+        flex-shrink: 0;
+        font-size: 15px;
+        /* 窄屏的应用名只作展示：它是桌面版「回到首页」的入口，手机上另有编辑器返回键，
+           在列表页点它本就无事可做，按下时那层底色反而像枚按钮 */
+        pointer-events: none;
+        cursor: default;
+    }
+    /* 现代布局把应用名整条隐藏了（桌面端应用名在侧边栏顶部），窄屏放回顶栏 */
+    html.modern-layout .titlebar .titlebar-brand {
+        display: inline-flex !important;
+    }
+    html .mobile-menu-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+    }
+    html .mobile-menu-toggle:active {
+        background: var(--item-active);
+        color: var(--text-primary);
+    }
+    /* 现代布局这条是悬浮在内容之上的：从左往右排，按钮组由 .titlebar-actions 的 margin 拉开；
+       只改左右内边距，上下与高度仍由 styles/web.css 的窄屏档给（那一档还要让开刘海） */
+    html.modern-layout .titlebar {
+        justify-content: flex-start;
+        gap: 2px;
+        padding-left: 8px;
+    }
+
+    /* ---------------- 2. 列表项：列表式，不是卡片式 ----------------
+       卡片式（每项一块圆角底、项与项之间留空隙）在手机上既费高度、也不便扫读：
+       改成整行铺满的列表 —— 行与行之间一条细线，行内仍是「标题 / 摘要 / 时间·文件夹」，
+       点按反馈交给 :active 的浅底。数据与结构一字未改，只换皮
+       （见 scripts/render.js 的 createNoteCard / createTodoCard）。
+       「更多」常显（触摸设备没有悬停），它与长按都打开同一套菜单。 */
+    .notes-list {
+        /* 分隔线要顶到两侧：列表自身不再留左右内边距，行内各自给 */
+        padding: 0 0 calc(12px + env(safe-area-inset-bottom)) 0;
+        gap: 0;
+    }
+    /* 首页列表不要那套「错开上浮」的进场（motion.css 的 .list-enter）：手机上每次切页
+       已经有一层横向位移，再叠一层整列上滑显得吵，几十张卡片各带延迟动一轮也白费帧预算。
+       动画仍留给桌面端；这里连 playListEnter 的类名一起压掉，不必改 JS */
+    #notes-list-box.list-enter > * {
+        animation: none;
+    }
+    .note-card {
+        position: relative;
+        padding: 11px 14px;
+        gap: 3px;
+        border: none;
+        border-bottom: 1px solid var(--border-light);
+        border-radius: 0;
+    }
+    /* 末行不再多画一条线（下面还有底栏或屏底留白收尾） */
+    .note-card:last-child {
+        border-bottom: none;
+    }
+    /* 触摸设备没有悬停：按下给一层浅底；选中态那一层由 .note-card.active 继续管 */
+    .note-card:active {
+        background-color: var(--item-active);
+    }
+    /* 滑动切页：列表整块跟着手指位移（见 scripts/app.js 的 bindFilterSwipe），
+       相邻页此刻临时挂在列表旁边 —— 与列表同一套样式，只是绝对定位到旁边那一格。
+       松手后要么被提交（整页重渲染并归位）要么滑回原位，随后整个节点被移除。
+       面板因此要当它的定位参考系（面板里没有别的绝对定位元素，加 position 不影响排版） */
+    .notes-panel {
+        position: relative;
+    }
+    .notes-list.swiping {
+        will-change: transform;
+    }
+    .notes-list-ghost {
+        position: absolute;
+        width: 100%;
+        pointer-events: none;
+        /* 快照不需要滚（越长越裁掉就好），也免得多出一条滚动条 */
+        overflow: hidden;
+    }
+    /* 两页之间那条分界线：画在相邻页贴着当前页的那一侧边上，跟着相邻页一起动。
+       与桌面端列表栏之间的竖线同一道颜色与粗细 */
+    .notes-list-ghost::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--border-color);
+    }
+    .notes-list-ghost.to-right::before {
+        left: 0;
+    }
+    .notes-list-ghost.to-left::before {
+        right: 0;
+    }
+    .note-card-more {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 32px;
+        height: 32px;
+        border-radius: var(--radius-sm);
+        color: var(--text-muted);
+    }
+    .note-card-more:active {
+        background: var(--item-active);
+        color: var(--text-primary);
+    }
+    /* 标题让出「更多」那一格，不钻到按钮底下 */
+    .note-card-title {
+        padding-right: 30px;
+    }
+
+    /* ---------------- 2.5 编辑器底栏 ----------------
+       顶栏的「编辑 / 分屏 / 预览」与待办完成在窄屏被挪到底栏（见 scripts/app.js 的
+       applyEditorActionsPlacement），与保存状态同处一行，拇指够得到 */
+    .editor-footer {
+        /* 桌面版这一行固定 28px 高（见 styles/editor.css）；手机上它还要装 32px 的图标按钮
+           与视图切换，高度必须交回内容决定，否则内容会从那一行里溢出到外面。
+           下侧与底栏同一道屏底留白：圆角与手势条别切到统计与按钮 */
+        height: auto;
+        padding: 4px 10px var(--mobile-bottom-gap) 10px;
+        gap: 8px;
+    }
+    .editor-footer .editor-actions {
+        gap: 4px;
+    }
+    .editor-footer .view-btn {
+        /* 默认一档（web.css 的触摸档给的是 5px 10px）在手机上偏胖，收一档 */
+        padding: 3px 8px;
+        font-size: 11px;
+    }
+    .editor-footer .btn-action-icon {
+        width: 32px;
+        height: 32px;
+    }
+
+    /* ---------------- 3. 条目菜单：贴在底栏上沿，与那块面板同一副样子 ----------------
+       弹在手指落点附近并不好按：窄屏一律改成贴在底栏上沿的整块面板 —— 行高 52px、
+       图标用主题色、从下往上滑入，与「新建」面板（第 1.5 节）看起来是同一块东西；
+       其余画面压一层深色遮罩（共用 #mobile-sheet-mask），底栏本身仍亮着、也仍可点。
+       位置由 inline 样式给出，这里整段覆盖（见 scripts/render.js 的 buildContextMenu）；
+       底栏高度实测后记进 --mobile-tabbar-height（见 scripts/app.js 的 observeTabbarHeight）。
+       唯一不走这一套的是顶栏右端那枚菜单（`data-menu-kind="topbar"`）：它是「右键菜单」那种
+       浮层，位置、行高与长相全用 styles/overlays.css 的原样，只在下文补两笔触摸档的取值。 */
+    .context-menu:not([data-menu-kind="topbar"]) {
+        left: 0 !important;
+        right: 0;
+        top: auto !important;
+        bottom: calc(var(--mobile-tabbar-height, 0px) + env(safe-area-inset-bottom)) !important;
+        padding: 6px;
+        gap: 6px;
+        /* 底栏自己的上边框就是两者之间那条线，这里不再另画；也不描边、不投影、
+           不收角 —— 与底栏拼成一块，才与「新建」面板是同一副样子 */
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        max-height: 60vh;
+        overflow-y: auto;
+        /* 收起态：整块退进底栏那一格并渐隐。展开与收起都走过渡 —— 用 animation 只有进场，
+           收场还得靠 JS 拖住 display；所以收起时不能落回 display: none，
+           见下面的 #context-menu.hidden */
+        visibility: visible;
+        opacity: 0;
+        transform: translateY(100%);
+        transition: transform var(--motion-slow) var(--ease-out),
+                    opacity var(--motion-slow) var(--ease-out),
+                    visibility 0s;
+    }
+    #context-menu:not(.hidden) {
+        opacity: 1;
+        transform: none;
+    }
+    /* 窄屏的 .hidden 不再撤掉 display（撤掉的那一刻过渡就断了），改成不可见 + 不可点：
+       元素留在渲染树里，展开与收起才都能补间。visibility 本身不可补间，
+       只能等位移与渐隐跑完再翻，所以把它推迟一个 --motion-slow。
+       顶栏那枚浮层例外：它照旧落回 display: none 直接收掉，与桌面端的右键菜单一致 */
+    #context-menu.hidden:not([data-menu-kind="topbar"]) {
+        display: flex !important;
+        pointer-events: none;
+        visibility: hidden;
+        transition: transform var(--motion-slow) var(--ease-out),
+                    opacity var(--motion-slow) var(--ease-out),
+                    visibility 0s var(--motion-slow);
+    }
+    /* 层级：贴底栏的菜单要低于底栏（291）—— 收起时整块滑进底栏那一格、被底栏挡住，
+       看上去就是「收进底栏」；停在位时它贴在底栏上沿，本来也不重叠。
+       同时又得高于遮罩（289），否则会被那层黑纱罩住。
+       顶栏那枚浮层同样给 290：它在屏幕上半部，与底栏、遮罩都不重叠 */
+    #context-menu {
+        z-index: 290;
+    }
+    .context-menu:not([data-menu-kind="topbar"]) .context-menu-item {
+        height: 52px;
+        flex-shrink: 0;
+        gap: 10px;
+        padding: 0 14px;
+        font-size: 15px;
+    }
+    .context-menu:not([data-menu-kind="topbar"]) .context-menu-item .ms-icon {
+        font-size: 22px;
+        color: var(--accent);
+    }
+    /* 顶栏右端那枚菜单（data-menu-kind="topbar"）：右键菜单式的浮层 —— 位置由
+       buildContextMenu 按按钮的框算出来（右边缘贴屏缘、下面留 4px），遮罩也不给它。
+       这里只把行加厚一点，免得手机上不好按；描边、圆角、投影、图标色一律沿用
+       styles/overlays.css 的原样（它自己带一段 dropdownIn 的入场） */
+    #context-menu[data-menu-kind="topbar"] {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    #context-menu[data-menu-kind="topbar"] .context-menu-item {
+        padding: 9px 12px;
+        font-size: 13.5px;
+    }
+    /* 当前生效的那一条（列表表头的筛选菜单用）：文字走主题色，尾端补一枚对勾 */
+    .context-menu-item.active {
+        color: var(--accent);
+    }
+    .context-menu-item-check {
+        margin-left: auto;
+    }
+    /* 破坏性的那一项（移入废纸篓 / 彻底删除）：图标跟正文同色 —— overlays.css 已把整条
+       设成 --danger，这里直接继承，免得图标还留着主题色、与红字对不上。
+       选择器必须带上与上面那条同样的 :not(...)：那条现在权重 (0,4,0)，
+       裸写 .context-menu-item.danger .ms-icon 只有 (0,3,0)，压不住，图标会一直是主题色 */
+    .context-menu:not([data-menu-kind="topbar"]) .context-menu-item.danger .ms-icon {
+        color: inherit;
+    }
+    .context-menu-divider {
+        margin: 0 4px;
+    }
+    /* 贴底栏的菜单铺开时压一层遮罩：点它收回。遮罩与底栏面板共用同一个元素，
+       因此要多认这一种状态（点击处理见 scripts/app.js）；顶栏那枚浮层不要遮罩，
+       与桌面端的右键菜单一致（点空白、滚动、转屏都有现成的关闭时机） */
+    html:has(#context-menu:not([data-menu-kind="topbar"]):not(.hidden)) .mobile-sheet-mask {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* ---------------- 4. 虚拟键盘 ----------------
+       键盘弹起时底栏整整条往下让开（见第 1 节的那组「底栏让位」），
+       并把高度记进 --keyboard-inset，供弹窗、提示条各自让位（见 scripts/app.js 的 bindKeyboardInset）。 */
+    .dialog-mask,
+    .gate-mask {
+        padding-bottom: calc(16px + var(--keyboard-inset, 0px));
+    }
+    .toast-box {
+        bottom: calc(12px + var(--keyboard-inset, 0px) + env(safe-area-inset-bottom));
+    }
+
+    /* ---------------- 5. 秘密本 ----------------
+       设置页里的秘密本条目与设置行同一副样子（见第 2.7 节那一套）：去底去框、
+       行间只留一条细线；条目里的动作按钮太宽，横排会溢出，改成正文下方换行排。
+       选择器带 html 前缀是为了压过 styles/secret.css 里同权重的写法 */
+    html .settings-view .secret-list {
+        gap: 0;
+        max-width: none;
+    }
+    html .settings-view .secret-item {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 0;
+        background: none;
+        border: none;
+        border-bottom: 1px solid var(--border-light);
+        border-radius: 0;
+    }
+    html .settings-view .secret-list > .secret-item:last-child {
+        border-bottom: none;
+    }
+    html .settings-view .secret-item .settings-actions {
+        justify-content: flex-start;
+    }
+    html .settings-view .secret-empty {
+        padding: 12px 0;
+        border: none;
+    }
+}
+
+/* 动效偏好：底栏面板与两处遮罩直接就位；条目菜单收起态那条 transition 权重更高
+   （#context-menu.hidden:not([data-menu-kind="topbar"])），工作区那两条同理（开着那条带着
+   :has()，而退场只改目标值、过渡仍取自它），都得单独点出来，否则关的时候照样会播一遍。
+   列表翻页的位移也一并取消（页面照样会换，只是不补间） */
+@media (max-width: 860px) and (prefers-reduced-motion: reduce) {
+    .mobile-sheet,
+    .mobile-sheet-inner,
+    .mobile-sheet-mask,
+    .mobile-ai-mask,
+    .notes-list,
+    .mobile-tabbar,
+    .app-body > .workspace,
+    .app-body > .workspace:has(#editor-topbar:not(.hidden)),
+    #context-menu,
+    #context-menu.hidden:not([data-menu-kind="topbar"]) {
+        transition: none;
+    }
+}

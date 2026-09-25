@@ -1,0 +1,122 @@
+/* 动效层：进场动画与换肤交叉淡入。只负责「动」，不改变任何静默状态下的外观——
+   抽掉本文件的 <link>（或系统开启「减少动态效果」），界面回到原来的静态样子。
+
+   界面的显示 / 隐藏统一走 .hidden（display: none !important），元素一旦不再渲染，
+   退场动画就没有播放的机会，因此这里基本都是进场动画。
+   时长与曲线统一取 tokens.css 的 --motion-* / --ease-* 令牌。 */
+
+/* ---------- 关键帧 ---------- */
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+}
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(6px); }
+}
+@keyframes slideInDown {
+    from { opacity: 0; transform: translateY(-8px); }
+}
+@keyframes popIn {
+    from { opacity: 0; transform: scale(0.94); }
+}
+
+/* ---------- 1. 面板与视图 ---------- */
+
+/* AI 助手面板的收起 / 展开是宽度过渡（见 styles/ai.css） */
+.ai-drawer {
+    animation: slideInDown var(--motion-base) var(--ease-out);
+}
+
+/* 设置视图整块淡入；分类面板再补一次「淡入上浮」 */
+.settings-view {
+    animation: fadeIn var(--motion-base) var(--ease-out);
+}
+.settings-panel {
+    animation: fadeInUp var(--motion-base) var(--ease-out);
+}
+
+/* ---------- 2. 工作区（编辑器） ---------- */
+
+/* 打开一篇笔记时，顶栏 → 工具栏 → 标题 → 正文 → 状态栏依次淡入（每级差 20~30ms） */
+.editor-topbar {
+    animation: fadeIn var(--motion-base) var(--ease-out);
+}
+.editor-toolbar {
+    animation: fadeInUp var(--motion-base) var(--ease-out) 30ms backwards;
+}
+.editor-title-area {
+    animation: fadeInUp var(--motion-base) var(--ease-out) 50ms backwards;
+}
+.editor-content-area {
+    animation: fadeInUp var(--motion-slow) var(--ease-out) 70ms backwards;
+}
+.editor-footer {
+    animation: fadeIn var(--motion-base) var(--ease-out) 90ms backwards;
+}
+
+/* 空状态：整块淡入，图标单独浮现一下 */
+#empty-state {
+    animation: fadeIn var(--motion-slow) var(--ease-out);
+}
+#empty-state > .ms-icon {
+    animation: popIn var(--motion-slow) var(--ease-out) 60ms backwards;
+}
+
+/* ---------- 3. 中栏列表：整列错开落位 ---------- */
+
+/* .list-enter 由 scripts/render.js 按「列表上下文是否变化」挂上、340ms 后自动摘掉。
+   不能无条件给卡片加动画：编辑正文时列表同样会整列重建，那样打字过程中卡片会反复淡入。 */
+#notes-list-box.list-enter > * {
+    animation: fadeInUp var(--motion-base) var(--ease-out) backwards;
+}
+#notes-list-box.list-enter > :nth-child(n+9) { animation-delay: 128ms; }
+#notes-list-box.list-enter > :nth-child(2) { animation-delay: 16ms; }
+#notes-list-box.list-enter > :nth-child(3) { animation-delay: 32ms; }
+#notes-list-box.list-enter > :nth-child(4) { animation-delay: 48ms; }
+#notes-list-box.list-enter > :nth-child(5) { animation-delay: 64ms; }
+#notes-list-box.list-enter > :nth-child(6) { animation-delay: 80ms; }
+#notes-list-box.list-enter > :nth-child(7) { animation-delay: 96ms; }
+#notes-list-box.list-enter > :nth-child(8) { animation-delay: 112ms; }
+
+/* ---------- 4. 换肤交叉淡入 ---------- */
+
+/* 切换明暗主题 / 界面风格时，整棵界面在 0.25s 内过渡到新配色，而不是整屏硬切。
+   类名由 scripts/app.js 在改配色之前挂到 <html> 上、250ms 后摘掉。 */
+html.appearance-fading,
+html.appearance-fading *,
+html.appearance-fading *::before,
+html.appearance-fading *::after {
+    transition: background-color var(--motion-crossfade) ease,
+                border-color var(--motion-crossfade) ease,
+                color var(--motion-crossfade) ease,
+                opacity var(--motion-crossfade) ease !important;
+}
+
+/* ---------- 5. 动效偏好 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+    .ai-drawer,
+    .settings-view,
+    .settings-panel,
+    .editor-topbar,
+    .editor-toolbar,
+    .editor-title-area,
+    .editor-content-area,
+    .editor-footer,
+    #empty-state,
+    #empty-state > .ms-icon,
+    #notes-list-box.list-enter > * {
+        animation: none !important;
+    }
+    /* 悬停滑出的「新建待办」：减少动效时直接出现在位，不做宽高补间 */
+    html.modern-layout .sidebar-action-wrap .sidebar-new-split .btn-sidebar-new-extra,
+    html.modern-layout .sidebar-action-wrap .sidebar-new-split .btn-sidebar-new-extra .ms-icon {
+        transition: none !important;
+    }
+    html.appearance-fading,
+    html.appearance-fading *,
+    html.appearance-fading *::before,
+    html.appearance-fading *::after {
+        transition: none !important;
+    }
+}

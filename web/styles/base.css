@@ -1,0 +1,310 @@
+/* 基础重置、标题栏与标签页、通用按钮与滚动条 */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    color: var(--text-primary);
+    background-color: var(--bg-body);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Material Symbols 图标：与桌面版同一套字面与字号档位 */
+.ms-icon {
+    font-family: 'Material Symbols Rounded';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 18px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'liga';
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+}
+.ms-icon.fill {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+}
+.ms-icon.xs { font-size: 14px; }
+.ms-icon.sm { font-size: 16px; }
+
+button {
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    outline: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+}
+
+input, textarea, select {
+    font-family: inherit;
+    color: inherit;
+    border: none;
+    outline: none;
+    background: transparent;
+}
+
+/* 正文与输入框允许选中：网页版不做桌面版那种整窗禁选 */
+.editor-textarea,
+.editor-title-input,
+.markdown-body,
+.search-box input,
+.settings-path,
+.secret-value {
+    user-select: text;
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+.app-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.hidden { display: none !important; }
+[hidden] { display: none !important; }
+
+/* Titlebar */
+.titlebar {
+    height: 40px;
+    flex-shrink: 0;
+    background-color: var(--bg-titlebar);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px 0 14px;
+    position: relative;
+    z-index: 100;
+}
+
+.titlebar-brand {
+    font-family: 'Mohave', var(--font-sans);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--brand-fg);
+    letter-spacing: 0.4px;
+    flex-shrink: 0;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background-color 0.15s, opacity 0.15s;
+}
+.titlebar-brand:hover {
+    background-color: var(--item-hover);
+}
+.titlebar-brand:active {
+    opacity: 0.7;
+}
+
+.titlebar-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+.titlebar-title {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+
+.titlebar-tabs {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    gap: 6px;
+    padding: 0 8px;
+}
+.titlebar-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+/* 悬浮式标签页 */
+.tab-item {
+    height: 28px;
+    min-width: 110px;
+    max-width: 190px;
+    padding: 0 8px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease-standard),
+                border-color 0.15s var(--ease-standard),
+                color 0.15s var(--ease-standard);
+    position: relative;
+    white-space: nowrap;
+}
+.tab-item:hover {
+    background-color: var(--item-hover);
+    color: var(--text-primary);
+}
+.tab-item.active {
+    background-color: var(--bg-elevated);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+    font-weight: 500;
+}
+/* 拖动排序中的标签：抬起来一层（底色 + 阴影），跟着指针左右移动（见 scripts/render.js 的标签栏拖动排序）。
+   过渡全部关掉，否则跟手时会有迟滞；换位时其余标签让位由布局自身完成，不需要动画 */
+.tab-item.is-dragging {
+    z-index: 5;
+    background-color: var(--bg-elevated);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    transition: none;
+}
+/* 拖动期间整条标签栏都是抓手光标：指针掠过别的标签时不该又变回小手 */
+.tab-item.is-dragging,
+.titlebar-tabs.is-dragging .tab-item,
+.workspace-tabs.is-dragging .tab-item {
+    cursor: grabbing;
+}
+.tab-item .tab-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tab-item .tab-icon {
+    flex-shrink: 0;
+    opacity: 0.75;
+}
+.tab-close-btn {
+    width: 18px;
+    height: 18px;
+    border-radius: var(--radius-sm);
+    opacity: 0.6;
+    transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+.tab-close-btn:hover {
+    opacity: 1;
+    background-color: var(--danger-bg);
+    color: var(--danger);
+}
+
+.titlebar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    flex-shrink: 0;
+}
+
+.btn-new-note {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    background-color: var(--accent);
+    color: var(--accent-fg);
+    font-size: 12px;
+    font-weight: 500;
+    transition: opacity 0.15s, transform 0.1s;
+}
+.btn-new-note:hover {
+    opacity: 0.9;
+}
+.btn-new-note:active {
+    transform: scale(0.98);
+}
+
+.btn-action-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    transition: background-color 0.15s, color 0.15s, transform 0.1s;
+}
+.btn-action-icon:hover {
+    background-color: var(--item-hover);
+    color: var(--text-primary);
+}
+.btn-action-icon:active {
+    transform: scale(0.94);
+}
+.btn-action-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.btn-action-icon:disabled:hover {
+    background-color: transparent;
+    color: var(--text-secondary);
+}
+
+/* 动效偏好：系统开启「减少动态效果」时去掉入场动画与按压缩放 */
+@media (prefers-reduced-motion: reduce) {
+    .toast-item,
+    .dropdown-menu,
+    .context-menu,
+    .dialog-box {
+        animation: none !important;
+    }
+    .btn-action-icon:active,
+    .btn-new-note:active,
+    .btn-sidebar-new:active,
+    .fmt-btn:active {
+        transform: none !important;
+    }
+}
