@@ -50,8 +50,8 @@
     <section class="gate" id="view-login" hidden>
         <div class="gate-card">
             <span class="gate-brand">EsprinSync</span>
-            <h1 class="gate-title">登录管理后台</h1>
-            <p class="gate-desc">只有管理员账户能进本页。账户在下方「账户」一节里新建，新增的账户默认只能登录网页版客户端。</p>
+            <h1 class="gate-title" id="gate-title">登录管理后台</h1>
+            <p class="gate-desc" id="gate-desc">只有管理员账户能进本页（其他账户在下方「账户」一节里新建）；给客户端取一份访问令牌的话，点右边的「生成令牌」，不需要管理员权限。</p>
             <label class="gate-field">
                 <span class="gate-field-label">账户名</span>
                 <input class="settings-input gate-input" id="login-name" type="text" autocomplete="username" value="admin" placeholder="admin">
@@ -60,8 +60,33 @@
                 <span class="gate-field-label">密码</span>
                 <input class="settings-input gate-input" id="login-pass" type="password" autocomplete="current-password" placeholder="账户密码">
             </label>
+
+            <!-- 设置令牌：点「生成令牌」才露出来，再点一次同样的按钮才去签发 -->
+            <div class="gate-extras" id="gate-token-options" hidden>
+                <div class="gate-field">
+                    <span class="gate-field-label">名称与绑定设备 id（都可留空）</span>
+                    <span class="gate-field-row">
+                        <input class="settings-input gate-input" id="token-user-label" type="text" maxlength="40" placeholder="名称，例如：台式机">
+                        <input class="settings-input mono gate-input" id="token-user-device" type="text" maxlength="40" placeholder="设备 id，例如：dev-a1b2c3">
+                    </span>
+                </div>
+                <p class="gate-note">绑定设备 id 之后，用这份令牌提交的操作都会记成那台设备；明文只在签发的那一次显示，离开本页就只剩摘要。</p>
+            </div>
+
             <p class="form-msg" id="login-msg"></p>
-            <button class="settings-btn primary gate-submit" id="login-btn" type="button">登录</button>
+            <div class="gate-actions">
+                <button class="settings-btn primary" id="login-btn" type="button">登录</button>
+                <button class="settings-btn" id="token-gen-btn" type="button">生成令牌</button>
+            </div>
+
+            <div class="secret-box" id="token-secret" hidden>
+                <div class="secret-head">
+                    <span class="secret-label">新令牌 · 只显示这一次</span>
+                    <button class="settings-btn" id="token-copy" type="button">复制令牌</button>
+                </div>
+                <code class="secret-value" id="token-value" tabindex="0" title="点一下全选"></code>
+                <p class="secret-hint">把它填进 EsprinNemo 的「设置 → 数据与存储 → 自建同步 → 访问令牌」；不需要的令牌可以在管理员登录后于「已有令牌」一节里删除。</p>
+            </div>
         </div>
     </section>
 

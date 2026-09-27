@@ -174,14 +174,18 @@ function render() {
     $('view-panel').hidden = !panelReady();
     $('logout-btn').hidden = !state.loggedIn;
 
+    // 登录成功后登录页被收起：回到登录模式，顺手把上一次签发的令牌明文清掉（它只该在那一次显示里出现）
     if (panelReady()) {
+        setLoginMode(false);
+
         $('header-desc').textContent = '当前账户 ' + (state.user ? state.user.name : '')
             + ' · 共 ' + state.accountCount + ' 个账户 · ' + state.tokenCount + ' 个访问令牌。'
             + '令牌明文只在创建或重置的那一瞬间出现，服务端只保存摘要。';
     } else {
         if (state.loggedIn && state.user) {
             setMessage('login-msg', '当前登录的账户「' + state.user.name
-                + '」不是管理员，进不了管理后台。请先退出，再用管理员账户登录。', 'error');
+                + '」不是管理员，进不了管理后台。请先退出，再用管理员账户登录；只想取一份访问令牌的话，'
+                + '点右边的「生成令牌」（按账户名与密码签发，与登录态无关）。', 'error');
         }
         $('journal-summary').textContent = '登录后可以查看与下载日志';
         $('journal-summary').title = '';
@@ -824,6 +828,88 @@ async function createToken() {
     showSecret('new-secret');
 }
 
+/* ---------------- 生成访问令牌（账户名 + 密码，不需要管理员身份） ----------------
+
+   与「新建令牌」一节的分别：那条路要先用管理员账户登录、再选中令牌的归属账户；
+   这条路只要知道某个账户自己的密码，服务端就为它签发一份令牌（见 sync.py 的 /admin/api/tokens/generate），
+   因此非管理员也能自助取一份去配置客户端。
+
+   登录卡片因此有两种模式，共用同一对账户名 / 密码输入框与同一条提示行：
+   - 登录（默认）：点「登录」进管理后台；
+   - 设置令牌：点「生成令牌」切过来，露出名称与绑定设备这两个选项，再点一次「生成令牌」才真的签发。
+   一次点击不会在你还没确认要发什么之前就把令牌建出来；这一模式下左边的按钮换成「返回登录」。 */
+let tokenMode = false;
+
+const GATE_MODE_TEXT = {
+    login: {
+        title: '登录管理后台',
+        desc: '只有管理员账户能进本页（其他账户在下方「账户」一节里新建）；给客户端取一份访问令牌的话，'
+            + '点右边的「生成令牌」，不需要管理员权限。',
+    },
+    token: {
+        title: '设置令牌',
+        desc: '不需要管理员权限：填某个账户自己的账户名与密码，服务端就为它签发一份访问令牌，'
+            + '明文只显示这一次；账户名留空表示内置账户 admin。',
+    },
+};
+
+function setLoginMode(token) {
+    tokenMode = token === true;
+    const text = tokenMode ? GATE_MODE_TEXT.token : GATE_MODE_TEXT.login;
+    $('gate-title').textContent = text.title;
+    $('gate-desc').textContent = text.desc;
+    $('gate-token-options').hidden = !tokenMode;
+    // 按钮上写清当前模式下它们各自会做什么：另一格永远是可以退回的那条路
+    $('login-btn').textContent = tokenMode ? '返回登录' : '登录';
+    $('login-btn').classList.toggle('primary', !tokenMode);
+    $('token-gen-btn').classList.toggle('primary', tokenMode);
+
+    // 上一次的结果与提示都属于另一模式，切过来就清掉
+    $('token-value').textContent = '';
+    $('token-secret').hidden = true;
+    setMessage('login-msg', tokenMode ? '填好账户名与密码（可再指定名称与绑定设备 id），再点一次「生成令牌」。' : '');
+}
+
+// 「生成令牌」的第一下只是切到设置令牌，第二下才真的去签发
+async function clickTokenButton() {
+    if (!tokenMode) {
+        setLoginMode(true);
+        return;
+    }
+    await generateUserToken();
+}
+
+async function generateUserToken() {
+    const name = $('login-name').value.trim();
+    const password = $('login-pass').value;
+    if (!password) return setMessage('login-msg', '请填写该账户的密码', 'error');
+
+    const button = $('token-gen-btn');
+    button.disabled = true;
+    setMessage('login-msg', '正在生成…');
+    try {
+        const { status, data } = await api('/tokens/generate', {
+            name,
+            password,
+            tokenName: $('token-user-label').value.trim(),
+            device: $('token-user-device').value.trim(),
+        });
+        if (status !== 200) {
+            setMessage('login-msg', data.error || '生成失败（HTTP ' + status + '）', 'error');
+            return;
+        }
+
+        $('login-pass').value = '';
+        $('token-value').textContent = data.token || '';
+        setMessage('login-msg', '已为账户「' + ((data.user && data.user.name) || name || 'admin')
+            + '」签发令牌，明文只显示这一次。', 'ok');
+        toast('访问令牌已生成');
+        showSecret('token-secret');
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function createUser() {
     const name = $('user-name').value.trim();
     const password = $('user-pass').value;
@@ -849,7 +935,14 @@ async function createUser() {
 
 function bindEvents() {
     $('setup-btn').addEventListener('click', submitSetup);
-    $('login-btn').addEventListener('click', submitLogin);
+    // 设置令牌模式下这一格是「返回登录」：先退回登录，再点一次才去登录
+    $('login-btn').addEventListener('click', () => {
+        if (tokenMode) {
+            setLoginMode(false);
+            return;
+        }
+        submitLogin();
+    });
     $('user-create').addEventListener('click', () => {
         createUser().catch((error) => {
             console.error('新建账户失败:', error);
@@ -864,6 +957,21 @@ function bindEvents() {
         await loadJournal();
     });
     $('new-btn').addEventListener('click', createToken);
+
+    // 登录卡片里的「生成令牌」：第一下切到设置令牌、第二下签发，失败在卡片里原地说明
+    const runGenerate = () => {
+        clickTokenButton().catch((error) => {
+            console.error('生成令牌失败:', error);
+            setMessage('login-msg', '生成失败，请检查网络后重试', 'error');
+        });
+    };
+    $('token-gen-btn').addEventListener('click', runGenerate);
+    $('token-copy').addEventListener('click', (event) => copyElement('token-value', event.currentTarget));
+    selectAllOnClick('token-value');
+
+    // 账户名与密码两格在两个模式下含义相同：回车按当前模式决定是登录还是签发
+    const submitGate = () => (tokenMode ? runGenerate() : submitLogin());
+
     $('pass-btn').addEventListener('click', submitPasswordChange);
     $('logout-btn').addEventListener('click', async () => {
         await api('/logout', {});
@@ -894,9 +1002,10 @@ function bindEvents() {
         });
     });
 
-    [['setup-pass', 'setup-pass2', submitSetup], ['login-pass', null, submitLogin],
-     ['login-name', null, submitLogin], ['pass-new', 'pass-new2', submitPasswordChange],
-     ['user-pass', null, createUser]]
+    [['setup-pass', 'setup-pass2', submitSetup], ['login-pass', null, submitGate],
+     ['login-name', null, submitGate], ['pass-new', 'pass-new2', submitPasswordChange],
+     ['user-pass', null, createUser], ['token-user-label', null, runGenerate],
+     ['token-user-device', null, runGenerate]]
         .forEach(([first, second, handler]) => {
             [first, second].filter(Boolean).forEach((id) => {
                 $(id).addEventListener('keydown', (event) => {

@@ -86,6 +86,21 @@ RECYCLE_HOLD_SECONDS = 15 * 60
 RECYCLE_POOL_LIMIT = 500
 RECYCLE_CLAIM_MAX = 8
 
+# 团队笔记（共享笔记）：
+#   共享是一条「把谁的哪一篇共享给谁」的记录（shares.json），正文不复制——两位使用者
+#   各自的那份日志仍是唯一真相。接收方拿到的是所有者那篇内容的一条投影，落在它的
+#   shared/<所有者 id>/<条目 id>.md 上；接收方写回去的操作由服务端改写路径后
+#   落进所有者的日志，因此两人看到的始终是同一篇。
+SHARES_FILE_NAME = "shares.json"
+SHARE_PREFIX = "shared"
+SHARE_STATUS_PENDING = "pending"
+SHARE_STATUS_ACCEPTED = "accepted"
+# 接收方的投影路径：shared/<所有者 id>/<条目 id>.md
+SHARED_PATH_PATTERN = re.compile(r"^shared/([A-Za-z0-9_-]{1,64})/([A-Za-z0-9_-]{1,64})\.md$")
+# 笔记文件里内嵌元数据的标题行（见 Nemo 的 serializeItemFile）
+NOTE_TITLE_LINE_PATTERN = re.compile(r"^[ \t]*title:[ \t]*(.*)$", re.MULTILINE)
+NOTE_META_OPEN = "<!--EsprinData"
+
 
 def now_ms():
     return int(time.time() * 1000)
@@ -115,6 +130,40 @@ def normalize_relative_path(value):
     if not parts or any(part in FORBIDDEN_PATH_PARTS for part in parts):
         return ""
     return "/".join(parts)
+
+
+def note_title_from_data(data, encoding="utf8"):
+    """从一条 put 记录的内容里取笔记标题。
+
+    标题写在文件开头的内嵌元数据注释里（见 Nemo 的 serializeItemFile），没有注释时
+    退回正文首个非空行。只用于共享列表展示，取不到就返回空串。"""
+    if not isinstance(data, str) or encoding == "base64":
+        return ""
+    text = data.lstrip("\ufeff")
+    body = text
+    if text.startswith(NOTE_META_OPEN):
+        block, _separator, rest = text.partition("-->")
+        body = rest
+        matched = NOTE_TITLE_LINE_PATTERN.search(block)
+        if matched:
+            raw = matched.group(1).strip()
+            if raw.startswith('"'):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, str) and parsed.strip():
+                        return parsed.strip()[:60]
+                except ValueError:
+                    raw = raw.strip('"')
+            if raw:
+                return raw[:60]
+
+    for line in body.splitlines():
+        cleaned = line.strip().lstrip("#").strip()
+        if cleaned.startswith(("- ", "* ", "+ ", "> ")):
+            cleaned = cleaned[2:].strip()
+        if cleaned:
+            return cleaned[:60]
+    return ""
 
 
 def parse_int(value, default, minimum, maximum):
@@ -166,6 +215,8 @@ class UserStore:
         self.journals = {}
         self.sessions = {}
         self.failures = {}
+        # 团队笔记的共享记录（跨账户，因此挂在账户表这一层）
+        self.shares = ShareStore(data_dir)
         self._load()
 
     def _load(self):
@@ -1105,6 +1156,182 @@ class Journal:
         }
 
 
+class ShareStore:
+    """团队笔记的共享记录（正文不在这里）。
+
+    数据布局：<data>/shares.json，一条共享一项：
+        {"id": "<所有者 id>~<条目 id>~<接收方 id>", "owner": "<所有者 id>",
+         "note": "notes/<条目 id>.md", "target": "<接收方 id>",
+         "status": "pending"|"accepted", "createdAt": <毫秒>, "updatedAt": <毫秒>}
+
+    pending 是「已发出、等对方同意」，accepted 是「对方已同意、内容正在互相同步」。
+    同一条笔记对同一个人只保留一条记录：重复邀请直接返回原记录，不重复打扰对方。
+    所有者彻底删除该笔记时这些记录一并作废（见 forget_note）。
+    """
+
+    def __init__(self, data_dir):
+        self.path = os.path.join(data_dir, SHARES_FILE_NAME)
+        self.lock = threading.RLock()
+        self.items = []
+        self._load()
+
+    @staticmethod
+    def make_id(owner_id, note_id, target_id):
+        return "{}~{}~{}".format(owner_id, note_id, target_id)
+
+    def _load(self):
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict) or not isinstance(data.get("shares"), list):
+            return
+
+        loaded = []
+        for item in data["shares"]:
+            if not isinstance(item, dict):
+                continue
+            owner = str(item.get("owner") or "").strip()
+            target = str(item.get("target") or "").strip()
+            note = normalize_relative_path(item.get("note"))
+            match = ITEM_PATH_PATTERN.match(note)
+            if not owner or not target or not match or match.group(1) != "notes":
+                continue
+            loaded.append({
+                "id": str(item.get("id") or self.make_id(owner, match.group(2), target)),
+                "owner": owner,
+                "note": note,
+                "target": target,
+                "status": SHARE_STATUS_ACCEPTED if item.get("status") == SHARE_STATUS_ACCEPTED
+                else SHARE_STATUS_PENDING,
+                "createdAt": int(item.get("createdAt") or 0),
+                "updatedAt": int(item.get("updatedAt") or 0),
+            })
+        self.items = loaded
+
+    def _save(self):
+        payload = {"version": 1, "shares": self.items}
+        try:
+            temp = "{}.tmp".format(self.path)
+            with open(temp, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(temp, self.path)
+        except OSError as error:
+            log("ERROR", "Shares", "写入失败: {} (path={})".format(error, self.path))
+
+    def find(self, share_id):
+        with self.lock:
+            return self._find_locked(share_id)
+
+    def _find_locked(self, share_id):
+        wanted = str(share_id or "")
+        for item in self.items:
+            if item["id"] == wanted:
+                return item
+        return None
+
+    def get(self, owner_id, note, target_id):
+        with self.lock:
+            for item in self.items:
+                if item["owner"] == owner_id and item["note"] == note and item["target"] == target_id:
+                    return dict(item)
+        return None
+
+    def for_owner(self, owner_id):
+        with self.lock:
+            return [dict(item) for item in self.items if item["owner"] == owner_id]
+
+    def for_target(self, target_id):
+        with self.lock:
+            return [dict(item) for item in self.items if item["target"] == target_id]
+
+    def accepted_targets(self, owner_id, note):
+        """该路径上已同意接收的账户 id（按加入次序，去重）。"""
+        with self.lock:
+            seen = []
+            for item in self.items:
+                if item["owner"] != owner_id or item["note"] != note:
+                    continue
+                if item["status"] != SHARE_STATUS_ACCEPTED:
+                    continue
+                if item["target"] not in seen:
+                    seen.append(item["target"])
+            return seen
+
+    def accepted_for(self, owner_id, note_id, target_id):
+        """接收方是否确实可以读写这条投影路径。可以时返回那份记录。"""
+        note = "notes/{}.md".format(note_id)
+        with self.lock:
+            for item in self.items:
+                if (item["owner"] == owner_id and item["note"] == note
+                        and item["target"] == target_id and item["status"] == SHARE_STATUS_ACCEPTED):
+                    return dict(item)
+        return None
+
+    def add(self, owner_id, note, target_id):
+        with self.lock:
+            for item in self.items:
+                if item["owner"] == owner_id and item["note"] == note and item["target"] == target_id:
+                    return dict(item), ""
+            now = now_ms()
+            note_id = ITEM_PATH_PATTERN.match(note).group(2)
+            record = {
+                "id": self.make_id(owner_id, note_id, target_id),
+                "owner": owner_id,
+                "note": note,
+                "target": target_id,
+                "status": SHARE_STATUS_PENDING,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            self.items.append(record)
+            self._save()
+            return dict(record), ""
+
+    def set_status(self, share_id, status):
+        with self.lock:
+            item = self._find_locked(share_id)
+            if not item:
+                return None
+            item["status"] = status
+            item["updatedAt"] = now_ms()
+            self._save()
+            return dict(item)
+
+    def remove(self, share_id):
+        with self.lock:
+            item = self._find_locked(share_id)
+            if not item:
+                return None
+            self.items.remove(item)
+            self._save()
+            return dict(item)
+
+    def forget_note(self, owner_id, note):
+        """所有者彻底删除某篇笔记：与它有关的共享记录全部作废。
+
+        删除之后那个条目 ID 会回到回收池，可能被下一篇新建的笔记用上；留着旧记录
+        会让接收方平白看到一篇自己没同意过的新笔记。"""
+        with self.lock:
+            doomed = [item for item in self.items if item["owner"] == owner_id and item["note"] == note]
+            if not doomed:
+                return []
+            self.items = [item for item in self.items if item not in doomed]
+            self._save()
+            return [dict(item) for item in doomed]
+
+    def forget_user(self, user_id):
+        """账户被删除：以它为所有者或以它为接收方的共享全部作废。"""
+        with self.lock:
+            doomed = [item for item in self.items if item["owner"] == user_id or item["target"] == user_id]
+            if not doomed:
+                return []
+            self.items = [item for item in self.items if item not in doomed]
+            self._save()
+            return [dict(item) for item in doomed]
+
+
 MANAGER_DIR_NAME = "manager"
 WEB_DIR_NAME = "web"
 INDEX_NAME = "index.html"
@@ -1470,6 +1697,255 @@ class ApiHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
 
+    # ---------------- 团队笔记（共享笔记） ----------------
+    #
+    # 正文始终只存在所有者那份日志里。接收方看到的是同一条内容在它自己日志里的投影，
+    # 路径为 shared/<所有者 id>/<条目 id>.md；接收方写回的操作由服务端改写路径后
+    # 落进所有者的日志，所有者的改动再投影回各个接收方。两个方向都不复制正文，
+    # 因此两边始终是同一篇，不会各改各的。
+
+    def _user_name(self, user_id):
+        user = self.users.find_user(user_id)
+        return user["name"] if user else ""
+
+    def _describe_share(self, item):
+        """共享记录 → 界面用的一份描述（补上双方名字与笔记标题）。"""
+        match = ITEM_PATH_PATTERN.match(item["note"])
+        entry = self._journal_for(item["owner"]).read_file(item["note"]) if match else None
+        return {
+            "id": item["id"],
+            "owner": item["owner"],
+            "ownerName": self._user_name(item["owner"]) or item["owner"],
+            "target": item["target"],
+            "targetName": self._user_name(item["target"]) or item["target"],
+            "note": item["note"],
+            "noteId": match.group(2) if match else "",
+            "status": item["status"],
+            "title": note_title_from_data(entry.get("data"), entry.get("encoding", "utf8")) if entry else "",
+            "createdAt": item["createdAt"],
+            "updatedAt": item["updatedAt"],
+        }
+
+    @staticmethod
+    def _mirror_op(owner_id, note_id, raw_op):
+        """把所有者那侧的一条操作改写成接收方的投影路径。
+
+        操作号带上所有者 id 与随机后缀：两侧日志各自独立编号，重放同一条也不会互相顶掉。"""
+        kind = raw_op.get("op")
+        if kind not in ("put", "del"):
+            return None
+        mirror = {
+            "opId": "share-{}-{}-{}".format(
+                owner_id, str(raw_op.get("opId") or "") or uuid.uuid4().hex, uuid.uuid4().hex[:8]),
+            "op": kind,
+            "path": "{}/{}/{}.md".format(SHARE_PREFIX, owner_id, note_id),
+            "time": int(raw_op.get("time") or now_ms()),
+            "device": str(raw_op.get("device") or ""),
+        }
+        if kind == "del":
+            return mirror
+
+        data = raw_op.get("data")
+        if not isinstance(data, str):
+            return None
+        mirror["data"] = data
+        mirror["encoding"] = "base64" if raw_op.get("encoding") == "base64" else "utf8"
+        mirror["hash"] = raw_op.get("hash") or (
+            sha256_text(data) if mirror["encoding"] == "utf8" else "")
+        return mirror
+
+    def _mirror_share_op(self, owner_id, raw_op, exclude=""):
+        """把刚刚落进所有者日志的一条操作投影给各个接收方（发起写回的那一位除外）。
+
+        返回投出去的份数。所有者的这篇被彻底删除时，与它有关的共享记录同时作废：
+        那个条目 ID 会回到回收池，留着记录会让接收方看到一篇自己没同意过的新笔记。"""
+        note = normalize_relative_path(raw_op.get("path"))
+        match = ITEM_PATH_PATTERN.match(note)
+        if not match or match.group(1) != "notes":
+            return 0
+
+        if raw_op.get("op") == "del":
+            targets = [item["target"] for item in self.users.shares.forget_note(owner_id, note)]
+        else:
+            targets = self.users.shares.accepted_targets(owner_id, note)
+
+        delivered = 0
+        for target_id in targets:
+            if not target_id or target_id == exclude:
+                continue
+            mirror = self._mirror_op(owner_id, match.group(2), raw_op)
+            if not mirror:
+                continue
+            result = self._journal_for(target_id).append_many(mirror["device"], [mirror])
+            if result and not result[0].get("error"):
+                delivered += 1
+        return delivered
+
+    def _publish_shared_ops(self, owner_id, ops, results, exclude=""):
+        """把一批刚被受理的操作投影出去。重复提交（duplicate）不重复投影。"""
+        for raw, result in zip(ops, results):
+            if not isinstance(raw, dict) or result.get("error") or result.get("duplicate"):
+                continue
+            self._mirror_share_op(owner_id, raw, exclude)
+
+    def _classify_op(self, user_id, raw):
+        """把一条待推送操作分成三类：
+        own（落进自己的日志）、routed（改写路径后落进所有者的日志）、rejected（附带原因）。"""
+        if not isinstance(raw, dict):
+            return "rejected", None, "操作格式不正确"
+
+        match = SHARED_PATH_PATTERN.match(normalize_relative_path(raw.get("path")))
+        if not match:
+            return "own", raw, ""
+
+        owner_id, note_id = match.group(1), match.group(2)
+        share = self.users.shares.accepted_for(owner_id, note_id, user_id)
+        if not share:
+            return "rejected", None, "这条共享笔记不存在或已被撤销，请在设置里刷新「团队笔记」"
+        if raw.get("op") != "put":
+            return "rejected", None, "共享笔记不能由接收方删除，请在设置里退出共享"
+
+        rewritten = dict(raw)
+        rewritten["path"] = share["note"]
+        return "routed", (owner_id, rewritten), ""
+
+    def _push_share_delete(self, item):
+        """往接收方的日志里推一条删除：撤销共享 / 退出共享 / 账户被删时，本地那份随之消失。"""
+        match = ITEM_PATH_PATTERN.match(item["note"])
+        if not match:
+            return False
+        mirror = self._mirror_op(item["owner"], match.group(2), {"op": "del", "time": now_ms()})
+        if not mirror:
+            return False
+        result = self._journal_for(item["target"]).append_many("", [mirror])
+        return bool(result) and not result[0].get("error")
+
+    def _drop_share(self, item, notify_target=False):
+        removed = self.users.shares.remove(item["id"])
+        if removed and notify_target:
+            self._push_share_delete(removed)
+        return removed
+
+    def _deliver_share(self, item):
+        """接受共享：把所有者那篇的当前内容作为一条 put 投进接收方的日志。"""
+        match = ITEM_PATH_PATTERN.match(item["note"])
+        entry = self._journal_for(item["owner"]).read_file(item["note"]) if match else None
+        if not match or not entry or entry.get("op") != "put":
+            return False
+        mirror = self._mirror_op(item["owner"], match.group(2), entry)
+        if not mirror:
+            return False
+        result = self._journal_for(item["target"]).append_many(str(entry.get("device") or ""), [mirror])
+        return bool(result) and not result[0].get("error")
+
+    def _purge_user_shares(self, user_id):
+        """账户被删除：与它有关的共享全部作废。
+
+        以它为所有者的那些已接受共享，还要往接收方的日志里推一条删除，否则对方会一直
+        留着一份再也不会更新的投影；以它为接收方的那些不必通知——它的账户目录随后整体删掉。"""
+        involved = self.users.shares.for_owner(user_id) + self.users.shares.for_target(user_id)
+        for item in involved:
+            if item["owner"] == user_id and item["status"] == SHARE_STATUS_ACCEPTED:
+                self._push_share_delete(item)
+        for share_id in {item["id"] for item in involved}:
+            self.users.shares.remove(share_id)
+
+    def _handle_sync_get_shares(self, record):
+        user_id = record["userId"]
+        outgoing = [self._describe_share(item) for item in self.users.shares.for_owner(user_id)]
+        incoming = [self._describe_share(item) for item in self.users.shares.for_target(user_id)]
+        self._send(200, {
+            "ok": True,
+            "user": user_id,
+            "userName": record.get("userName") or self._user_name(user_id) or user_id,
+            "outgoing": outgoing,
+            "incoming": [item for item in incoming if item["status"] == SHARE_STATUS_PENDING],
+            "received": [item for item in incoming if item["status"] == SHARE_STATUS_ACCEPTED],
+        })
+
+    def _handle_sync_post_share(self, path, record):
+        """共享相关动作。返回 True 表示已经作答。"""
+        user_id = record["userId"]
+        payload = self._read_json() or {}
+
+        if path == SYNC_PATH + "/shares/request":
+            note = normalize_relative_path(payload.get("path"))
+            match = ITEM_PATH_PATTERN.match(note)
+            if not match or match.group(1) != "notes":
+                self._send(400, {"ok": False, "error": "只能共享笔记（notes/ 下的条目）"})
+                return True
+
+            raw_target = str(payload.get("target") or "").strip()
+            target = self.users.find_user(raw_target) or self.users.find_user_by_name(raw_target)
+            if not target:
+                self._send(404, {"ok": False, "error": "找不到该用户：请填写对方的账户 ID 或账户名"})
+                return True
+            if target["id"] == user_id:
+                self._send(400, {"ok": False, "error": "不能共享给自己"})
+                return True
+            if not target["enabled"]:
+                self._send(400, {"ok": False, "error": "该账户已停用，无法共享"})
+                return True
+            if not self._journal_for(user_id).read_file(note):
+                self._send(400, {"ok": False, "error": "这篇笔记在服务端还不存在：请先「立即同步」一次再共享"})
+                return True
+
+            item, error = self.users.shares.add(user_id, note, target["id"])
+            if not item:
+                self._send(400, {"ok": False, "error": error or "无法创建共享"})
+                return True
+            log("INFO", "Shares", "共享请求: owner={} target={} note={}".format(user_id, target["id"], note))
+            self._send(200, {"ok": True, "share": self._describe_share(item)})
+            return True
+
+        if path == SYNC_PATH + "/shares/respond":
+            item = self.users.shares.find(payload.get("id"))
+            if not item or item["target"] != user_id:
+                self._send(404, {"ok": False, "error": "找不到这条共享请求"})
+                return True
+
+            if payload.get("accept") is False:
+                self.users.shares.remove(item["id"])
+                log("INFO", "Shares", "共享被拒绝: owner={} target={} note={}".format(
+                    item["owner"], user_id, item["note"]))
+                self._send(200, {"ok": True, "status": "declined"})
+                return True
+
+            if not self._deliver_share(item):
+                self.users.shares.remove(item["id"])
+                self._send(400, {"ok": False, "error": "这篇笔记已被删除，共享请求已作废"})
+                return True
+            updated = self.users.shares.set_status(item["id"], SHARE_STATUS_ACCEPTED)
+            log("INFO", "Shares", "共享已接受: owner={} target={} note={}".format(
+                item["owner"], user_id, item["note"]))
+            self._send(200, {"ok": True, "status": "accepted",
+                             "share": self._describe_share(updated or item)})
+            return True
+
+        if path == SYNC_PATH + "/shares/revoke":
+            item = self.users.shares.find(payload.get("id"))
+            if not item or item["owner"] != user_id:
+                self._send(404, {"ok": False, "error": "找不到这条共享记录"})
+                return True
+            self._drop_share(item, notify_target=True)
+            log("INFO", "Shares", "共享已撤销: owner={} target={} note={}".format(
+                user_id, item["target"], item["note"]))
+            self._send(200, {"ok": True})
+            return True
+
+        if path == SYNC_PATH + "/shares/leave":
+            item = self.users.shares.find(payload.get("id"))
+            if not item or item["target"] != user_id:
+                self._send(404, {"ok": False, "error": "找不到这条共享记录"})
+                return True
+            self._drop_share(item, notify_target=True)
+            log("INFO", "Shares", "退出共享: owner={} target={} note={}".format(
+                item["owner"], user_id, item["note"]))
+            self._send(200, {"ok": True})
+            return True
+
+        return False
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1581,6 +2057,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, state)
             return
 
+        # 团队笔记：我共享出去的、别人共享给我待确认的、以及已经共享到手的
+        if parsed.path == SYNC_PATH + "/shares":
+            self._handle_sync_get_shares(record)
+            return
+
         if parsed.path == SYNC_PATH + "/file":
             path = normalize_relative_path((query.get("path") or [""])[0])
             if not path:
@@ -1632,12 +2113,42 @@ class ApiHandler(BaseHTTPRequestHandler):
                 for raw in payload["ops"]:
                     if isinstance(raw, dict):
                         raw.pop("device", None)
-            accepted = journal.append_many(device, payload["ops"])
+
+            # 先分流：接收方写回共享笔记的操作要改写路径后落进所有者的日志
+            own = []
+            routed = {}
+            rejected = []
+            for raw in payload["ops"]:
+                kind, value, reason = self._classify_op(record["userId"], raw)
+                if kind == "routed":
+                    routed.setdefault(value[0], []).append(value[1])
+                elif kind == "rejected":
+                    rejected.append({"opId": str(raw.get("opId") or "") if isinstance(raw, dict) else "",
+                                     "seq": 0, "error": reason})
+                else:
+                    own.append(value)
+
+            accepted = []
+            if own:
+                results = journal.append_many(device, own)
+                accepted += results
+                self._publish_shared_ops(record["userId"], own, results)
+            for owner_id, items in routed.items():
+                results = self._journal_for(owner_id).append_many(device, items)
+                for raw, item in zip(items, results):
+                    if item.get("error"):
+                        accepted.append(item)
+                        continue
+                    # 序号属于所有者那份日志，与本机游标没有可比性：只回操作号，不回序号
+                    accepted.append({"opId": raw.get("opId"), "seq": 0, "routed": True})
+                self._publish_shared_ops(owner_id, items, results, exclude=record["userId"])
+            accepted += rejected
+
             if record.get("record"):
                 self.users.note_token_use(record["userId"], record["record"], str(payload.get("device") or ""))
 
             # 彻底删除（del）之后，这条路径的正文历史不必再留在日志里：只留那一条删除标记
-            deleted_paths = [raw.get("path") for raw in payload["ops"]
+            deleted_paths = [raw.get("path") for raw in own
                              if isinstance(raw, dict) and raw.get("op") == "del"]
             if deleted_paths:
                 compacted = journal.compact(deleted_paths)
@@ -1645,10 +2156,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                     log("INFO", "Journal", "彻底删除后整理日志: 抹掉 {} 行，保留 {} 行 (account={})".format(
                         compacted["removed"], compacted["kept"], record["userId"]))
 
-            rejected = [item for item in accepted if item.get("error")]
+            rejected_results = [item for item in accepted if item.get("error")]
             self._send(200, {
-                "ok": not rejected,
-                "error": rejected[0]["error"] if rejected else "",
+                "ok": not rejected_results,
+                "error": rejected_results[0]["error"] if rejected_results else "",
                 "latestSeq": journal.latest_seq,
                 "accepted": accepted,
             })
@@ -1673,10 +2184,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "count": len(picked), "pending": pending, "ids": picked})
             return
 
+        # 团队笔记：邀请 / 同意 / 拒绝 / 撤销 / 退出
+        if parsed.path.startswith(SYNC_PATH + "/shares/") and self._handle_sync_post_share(parsed.path, record):
+            return
+
         self._send(404, {"ok": False, "error": "未知接口"})
 
     # ---------------- 管理接口 ----------------
-    # 除 status / login / logout / 改自己的密码之外，一律要求管理员账户
+    # 除 status / login / logout / 换访问令牌 / 改自己的密码之外，一律要求管理员账户
 
     def _admin_guard(self):
         """已登录且是管理员时返回账户，否则自行作答并返回 None。"""
@@ -1790,6 +2305,35 @@ class ApiHandler(BaseHTTPRequestHandler):
             }, extra_headers={"Set-Cookie": self._session_cookie(session_id)})
             return
 
+        # 客户端登录：账户名 + 密码直接换一个访问令牌（明文只在这个响应里出现一次）。
+        # 桌面客户端无法持有登录 Cookie，这一步让它把长期凭据留在服务端：本机只保存令牌。
+        if path == API_PREFIX + "/tokens/generate":
+            ip = self._client_ip()
+            if not self.users.login_allowed(ip):
+                self._send(429, {"ok": False, "error": "尝试次数过多，请稍后再试"})
+                return
+            password = str(payload.get("password") or "")
+            if not password:
+                self._send(400, {"ok": False, "error": "请填写账户密码"})
+                return
+            user, error = self.users.authenticate(str(payload.get("name") or ""), password)
+            if not user:
+                self.users.note_login_failure(ip)
+                self._send(401, {"ok": False, "error": error})
+                return
+            token_id, token = self.users.create_token(
+                user["id"], payload.get("tokenName"), payload.get("device"))
+            log("INFO", "Auth", "为账户签发访问令牌: name={} tokenId={} ip={}".format(
+                user["name"], token_id, ip))
+            self._send(200, {
+                "ok": True,
+                "id": token_id,
+                "token": token,
+                "user": {"id": user["id"], "name": user["name"], "admin": bool(user["admin"])},
+                "tokens": self.users.list_tokens(user["id"]),
+            })
+            return
+
         current = self._current_user()
         if not current:
             self._send(401, {"ok": False, "error": "请先登录"})
@@ -1845,7 +2389,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
 
         if path == API_PREFIX + "/users/delete":
-            removed, error = self.users.delete_user(str(payload.get("id") or ""))
+            doomed = str(payload.get("id") or "")
+            if doomed:
+                self._purge_user_shares(doomed)
+            removed, error = self.users.delete_user(doomed)
             if not removed:
                 self._send(400, {"ok": False, "error": error})
                 return
@@ -2140,6 +2687,7 @@ def selftest():
         log("INFO", "Selftest", "section=admin")
         status, page = get(ADMIN_PATH, token=None)
         check("/admin 返回管理页面", status == 200 and "EsprinSync" in page.get("_raw", ""), repr(page)[:160])
+        check("管理页带登录页上的令牌生成入口", "token-gen-btn" in page.get("_raw", ""), repr(page)[:160])
 
         status, page = get(ADMIN_PATH + "/index.html", token=None)
         check("管理页也能按 /admin/index.html 打开", status == 200 and "<!DOCTYPE html>" in page.get("_raw", ""), repr(page)[:160])
@@ -2152,6 +2700,8 @@ def selftest():
 
         status, body = get(ADMIN_PATH + "/app.js", token=None)
         check("管理页脚本可直接取用", status == 200 and "API_BASE" in body.get("_raw", ""), repr(body)[:80])
+        check("管理页脚本带账户密码换令牌的入口",
+              status == 200 and "generateUserToken" in body.get("_raw", ""), repr(body)[:80])
 
         check("管理页字体随包提供",
               os.path.isfile(os.path.join(manager_dir(), "fonts", "Mohave-VariableFont_wght.ttf")), manager_dir())
@@ -2370,6 +2920,27 @@ def selftest():
         status, body = get(sync + "/state", token=token_alice)
         check("令牌读到的是它所属账户的日志",
               status == 200 and list(body["files"].keys()) == ["notes/alice.md"], repr(body["files"])[:160])
+
+        status, body = post(API_PREFIX + "/tokens/generate",
+                            {"name": "Alice", "password": "alice-pass-1",
+                             "tokenName": "客户端", "device": "dev-client"}, token=None)
+        token_alice_client = body.get("token", "")
+        check("账户名 + 密码可换取访问令牌",
+              status == 200 and token_alice_client.startswith("esn_")
+              and body.get("user", {}).get("id") == "alice" and len(body.get("tokens", [])) == 2,
+              repr(body)[:160])
+        status, body = post(API_PREFIX + "/tokens/generate",
+                            {"name": "Alice", "password": "alice-pass-9"}, token=None)
+        check("密码不对时换不到令牌", status == 401, repr(body))
+        status, body = post(API_PREFIX + "/tokens/generate", {"name": "Alice", "password": ""}, token=None)
+        check("没填密码时换不到令牌", status == 400, repr(body))
+        status, body = get(sync + "/state", token=token_alice_client)
+        check("换来的令牌读到的是它所属账户的日志",
+              status == 200 and list(body["files"].keys()) == ["notes/alice.md"], repr(body["files"])[:160])
+        status, body = get(API_PREFIX + "/tokens?user=alice", token=None, cookie=True)
+        check("换来的令牌也进了该账户的令牌列表",
+              status == 200 and len(body["tokens"]) == 2, repr(body)[:160])
+
         status, body = get(HEALTH_PATH, token=None)
         check("health 报出账户数与默认账户名",
               body.get("accountCount") == 2 and body.get("defaultAccount") == DEFAULT_ACCOUNT_NAME, repr(body))
@@ -2398,6 +2969,8 @@ def selftest():
         status, body = get(sync + "/state", token=token_alice)
         check("账户停用后它的令牌一并失效",
               status == 401 and "停用" in body.get("error", ""), repr(body))
+        status, body = post(API_PREFIX + "/tokens/generate", {"name": "Alice", "password": "alice-pass-2"}, token=None)
+        check("停用后也换不到令牌", status == 401 and "停用" in body.get("error", ""), repr(body))
         status, body = post(API_PREFIX + "/login", {"name": "Alice", "password": "alice-pass-2"}, token=None)
         check("停用后不能登录", status == 401 and "停用" in body.get("error", ""), repr(body))
         status, body = post(API_PREFIX + "/users/update", {"id": "alice", "enabled": True}, token=None, cookie=True)
@@ -2414,6 +2987,259 @@ def selftest():
         check("账户被删后它的令牌失效", status == 401, repr(body))
         status, body = post(API_PREFIX + "/users/delete", {"id": "nobody"}, token=None, cookie=True)
         check("删除不存在的账户时 400", status == 400, repr(body))
+
+        log("INFO", "Selftest", "section=shares")
+        # 共享是跨账户的事，单独起一份数据目录与一个服务端，免得影响上面那些账户与日志的断言
+        share_dir = os.path.join(tmp, "share-data")
+        share_httpd, share_users = create_server("127.0.0.1", 0, share_dir, "")
+        share_port = share_httpd.server_address[1]
+        threading.Thread(target=share_httpd.serve_forever, daemon=True).start()
+        share_base = f"http://127.0.0.1:{share_port}"
+
+        def share_call(method, path, payload=None, token=None):
+            data = None
+            headers = {}
+            if payload is not None:
+                data = _json.dumps(payload).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+            request = urllib.request.Request(share_base + path, data=data, headers=headers, method=method)
+            if token is not None:
+                request.add_header("Authorization", "Bearer " + token)
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    text = response.read().decode("utf-8")
+                    return response.status, (_json.loads(text) if text.strip() else {})
+            except urllib.error.HTTPError as error:
+                text = error.read().decode("utf-8")
+                try:
+                    parsed = _json.loads(text) if text.strip() else {}
+                except ValueError:
+                    parsed = {"_raw": text}
+                return error.code, parsed
+
+        share_users.create_user("alice", "alice-pass-11")
+        share_users.create_user("bob", "bob-pass-12")
+        _id, token_owner = share_users.create_token(DEFAULT_ACCOUNT_ID, "所有者", "dev-owner")
+        _id, token_alice = share_users.create_token("alice", "alice 客户端", "dev-alice")
+        _id, token_bob = share_users.create_token("bob", "bob 客户端", "dev-bob")
+        check("共享用例的令牌可用",
+              share_call("GET", sync + "/state", token=token_owner)[0] == 200, "")
+
+        # 所有者那篇笔记（带内嵌元数据注释，标题从注释里取）
+        note_text = ('<!--EsprinData\n    title: "课堂记录"\n    folder:\n    tags: []\n'
+                     '    isPinned: false\n    isTrashed: false\n    createdAt: 1\n    updatedAt: 1\n-->\n\n正文一')
+        status, body = share_call("POST", sync + "/ops", {"device": "dev-owner", "ops": [
+            {"opId": "ow-1", "op": "put", "path": "notes/one.md", "time": 1000,
+             "data": note_text, "hash": sha256_text(note_text)},
+        ]}, token=token_owner)
+        check("所有者先写入一篇笔记", status == 200 and body["accepted"][0].get("error") is None, repr(body))
+
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "admin"}, token=token_owner)
+        check("不能共享给自己", status == 400 and "自己" in body.get("error", ""), repr(body))
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "nobody"}, token=token_owner)
+        check("共享给不存在的账户时 404", status == 404, repr(body))
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "todos/one.md", "target": "alice"}, token=token_owner)
+        check("只能共享笔记", status == 400 and "笔记" in body.get("error", ""), repr(body))
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/never.md", "target": "alice"}, token=token_owner)
+        check("服务端还没有的笔记不能共享", status == 400, repr(body))
+
+        # 账户名与账户 id 都可以用来指定接收方
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "alice"}, token=token_owner)
+        share_alice = body.get("share", {}).get("id", "")
+        check("发出共享请求",
+              status == 200 and share_alice == "admin~one~alice"
+              and body["share"]["status"] == SHARE_STATUS_PENDING, repr(body)[:200])
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "alice"}, token=token_owner)
+        check("重复邀请沿用同一条记录", body.get("share", {}).get("id") == share_alice, repr(body)[:160])
+
+        status, body = share_call("GET", sync + "/shares", token=token_alice)
+        check("接收方看到待确认的请求",
+              status == 200 and len(body["incoming"]) == 1 and body["incoming"][0]["id"] == share_alice
+              and body["incoming"][0]["title"] == "课堂记录" and body["received"] == [],
+              repr(body)[:240])
+        status, body = share_call("GET", sync + "/shares", token=token_bob)
+        check("没被邀请的账户看不到请求",
+              status == 200 and body["incoming"] == [] and body["outgoing"] == [], repr(body)[:160])
+        status, body = share_call("GET", sync + "/shares", token=token_owner)
+        check("所有者看到自己共享出去的",
+              status == 200 and len(body["outgoing"]) == 1
+              and body["outgoing"][0]["targetName"] == "alice", repr(body)[:200])
+        status, body = share_call("GET", sync + "/shares", token=None)
+        share_users.create_user("pending", "pending-pass-13")
+        check("未知令牌取不到共享列表", status == 401, repr(body))
+
+        status, body = share_call("POST", sync + "/shares/respond",
+                                  {"id": share_alice, "accept": True}, token=token_bob)
+        check("不是收件人不能替他同意", status == 404, repr(body))
+        status, body = share_call("POST", sync + "/shares/respond",
+                                  {"id": share_alice, "accept": True}, token=token_alice)
+        check("接收方同意共享", status == 200 and body.get("status") == "accepted", repr(body)[:160])
+        status, body = share_call("GET", sync + "/ops?since=0", token=token_alice)
+        mirrored = [item for item in body["ops"] if item.get("path") == "shared/admin/one.md"]
+        check("同意后那篇内容投影进接收方的日志",
+              len(mirrored) == 1 and mirrored[0]["op"] == "put" and "正文一" in mirrored[0]["data"]
+              and mirrored[0]["device"] == "dev-owner", repr(body["ops"])[:200])
+        status, body = share_call("GET", sync + "/state", token=token_alice)
+        check("投影路径出现在接收方的状态里",
+              list(body["files"].keys()) == ["shared/admin/one.md"], repr(body["files"])[:200])
+
+        changed = note_text.replace("正文一", "接收方改的一篇")
+        status, body = share_call("POST", sync + "/ops", {"device": "dev-alice", "ops": [
+            {"opId": "al-share-1", "op": "put", "path": "shared/admin/one.md", "time": 2000,
+             "data": changed, "hash": sha256_text(changed)},
+        ]}, token=token_alice)
+        check("接收方写回共享笔记：算受理但不占本机日志的序号",
+              status == 200 and body["accepted"][0].get("routed") is True
+              and body["accepted"][0].get("seq") == 0, repr(body))
+        status, body = share_call("GET", sync + "/ops?since=0", token=token_owner)
+        routed = [item for item in body["ops"] if item.get("path") == "notes/one.md"]
+        check("写回的内容落在所有者的日志里",
+              routed and routed[-1]["data"] == changed and routed[-1]["device"] == "dev-alice",
+              repr(routed)[-200:])
+        status, body = share_call("GET", sync + "/state", token=token_alice)
+        check("写回的内容没有回头污染接收方自己的日志",
+              body["files"].get("shared/admin/one.md", {}).get("hash") == sha256_text(note_text),
+              repr(body["files"])[:200])
+
+        owned = note_text.replace("正文一", "所有者又改了一篇")
+        status, body = share_call("POST", sync + "/ops", {"device": "dev-owner", "ops": [
+            {"opId": "ow-2", "op": "put", "path": "notes/one.md", "time": 3000,
+             "data": owned, "hash": sha256_text(owned)},
+        ]}, token=token_owner)
+        check("所有者更新后照常受理", status == 200 and body["accepted"][0].get("error") is None, repr(body))
+        status, body = share_call("GET", sync + "/ops?since=1", token=token_alice)
+        tail = [item for item in body["ops"] if item.get("path") == "shared/admin/one.md"]
+        check("所有者的更新投影给接收方",
+              tail and tail[-1]["data"] == owned, repr(tail)[-200:])
+
+        status, body = share_call("POST", sync + "/ops", {"device": "dev-alice", "ops": [
+            {"opId": "al-share-2", "op": "del", "path": "shared/admin/one.md", "time": 3100},
+        ]}, token=token_alice)
+        check("接收方不能删掉共享笔记",
+              status == 200 and "退出共享" in body["accepted"][0].get("error", ""), repr(body))
+        status, body = share_call("POST", sync + "/ops", {"device": "dev-alice", "ops": [
+            {"opId": "al-share-3", "op": "put", "path": "shared/bob/one.md", "time": 3200,
+             "data": changed, "hash": sha256_text(changed)},
+        ]}, token=token_alice)
+        check("没被共享的投影路径写不进去",
+              status == 200 and "不存在或已被撤销" in body["accepted"][0].get("error", ""), repr(body))
+
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "bob"}, token=token_owner)
+        share_bob = body.get("share", {}).get("id", "")
+        check("同一篇可以共享给第二个账户", status == 200 and share_bob == "admin~one~bob", repr(body)[:160])
+        status, body = share_call("POST", sync + "/shares/respond",
+                                  {"id": share_bob, "accept": False}, token=token_bob)
+        check("接收方拒绝后记录消失", status == 200 and body.get("status") == "declined", repr(body))
+        status, body = share_call("GET", sync + "/shares", token=token_bob)
+        check("拒绝之后不再出现在列表里", body["incoming"] == [], repr(body)[:160])
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "bob"}, token=token_owner)
+        check("拒绝之后还能重新邀请",
+              status == 200 and body["share"]["status"] == SHARE_STATUS_PENDING, repr(body)[:160])
+        status, body = share_call("POST", sync + "/shares/respond",
+                                  {"id": share_bob, "accept": True}, token=token_bob)
+        check("第二个账户也能同意", status == 200 and body.get("status") == "accepted", repr(body)[:160])
+        status, body = share_call("GET", sync + "/ops?since=0", token=token_bob)
+        check("第二份投影带着最新的内容",
+              [item for item in body["ops"] if item.get("path") == "shared/admin/one.md"][-1]["data"] == owned,
+              repr(body["ops"])[-200:])
+
+        status, body = share_call("POST", sync + "/shares/revoke", {"id": share_alice}, token=token_bob)
+        check("不是所有者不能撤销", status == 404, repr(body))
+        alice_cursor = share_call("GET", sync + "/ops?since=0", token=token_alice)[1]["ops"][-1]["seq"]
+        status, body = share_call("POST", sync + "/shares/revoke", {"id": share_alice}, token=token_owner)
+        check("所有者撤销共享", status == 200 and body.get("ok") is True, repr(body))
+        status, body = share_call("GET", sync + "/ops?since={}".format(alice_cursor), token=token_alice)
+        check("撤销后接收方那边收到一条删除",
+              [item["op"] for item in body["ops"] if item.get("path") == "shared/admin/one.md"] == ["del"],
+              repr(body["ops"])[-200:])
+        status, body = share_call("GET", sync + "/shares", token=token_alice)
+        check("撤销后接收方列表清空",
+              body["incoming"] == [] and body["received"] == [], repr(body)[:160])
+
+        bob_cursor = share_call("GET", sync + "/ops?since=0", token=token_bob)[1]["ops"][-1]["seq"]
+        status, body = share_call("POST", sync + "/shares/leave", {"id": share_bob}, token=token_bob)
+        check("接收方可以主动退出共享", status == 200 and body.get("ok") is True, repr(body))
+        status, body = share_call("GET", sync + "/shares", token=token_bob)
+        check("退出后不再出现在接收方的列表里",
+              body["incoming"] == [] and body["received"] == [], repr(body)[:160])
+        status, body = share_call("GET", sync + "/ops?since={}".format(bob_cursor), token=token_bob)
+        check("退出后接收方那边收到一条删除",
+              [item["op"] for item in body["ops"] if item.get("path") == "shared/admin/one.md"] == ["del"],
+              repr(body["ops"])[-200:])
+
+        # 所有者彻底删除：共享记录随之作废，接收方那边也收到删除
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/one.md", "target": "bob"}, token=token_owner)
+        share_bob = body.get("share", {}).get("id", "")
+        share_call("POST", sync + "/shares/respond", {"id": share_bob, "accept": True}, token=token_bob)
+        bob_cursor = share_call("GET", sync + "/ops?since=0", token=token_bob)[1]["ops"][-1]["seq"]
+        status, body = share_call("POST", sync + "/ops", {"device": "dev-owner", "ops": [
+            {"opId": "ow-3", "op": "del", "path": "notes/one.md", "time": 4000},
+        ]}, token=token_owner)
+        check("所有者彻底删除笔记", status == 200 and body["accepted"][0].get("error") is None, repr(body))
+        status, body = share_call("GET", sync + "/shares", token=token_bob)
+        check("所有者删除笔记后共享记录作废", body["received"] == [], repr(body)[:160])
+        status, body = share_call("GET", sync + "/ops?since={}".format(bob_cursor), token=token_bob)
+        check("接收方那边收到删除",
+              [item["op"] for item in body["ops"] if item.get("path") == "shared/admin/one.md"] == ["del"],
+              repr(body["ops"])[-200:])
+
+        # 删除账户：以它为所有者的共享一并作废，接收方那边同样收到删除
+        share_cookies = {}
+
+        def share_admin(method, path, payload=None):
+            data = None
+            headers = {}
+            if payload is not None:
+                data = _json.dumps(payload).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+            if share_cookies:
+                headers["Cookie"] = "; ".join("{}={}".format(key, value)
+                                              for key, value in share_cookies.items())
+            request = urllib.request.Request(share_base + path, data=data, headers=headers, method=method)
+            with urllib.request.urlopen(request, timeout=5) as response:
+                cookie = response.headers.get("Set-Cookie")
+                if cookie and "=" in cookie:
+                    key, value = cookie.split(";", 1)[0].split("=", 1)
+                    if value.strip():
+                        share_cookies[key.strip()] = value.strip()
+                text = response.read().decode("utf-8")
+            return response.status, (_json.loads(text) if text.strip() else {})
+
+        keep_text = note_text.replace("课堂记录", "会议纪要")
+        share_call("POST", sync + "/ops", {"device": "dev-alice", "ops": [
+            {"opId": "al-keep-1", "op": "put", "path": "notes/keep.md", "time": 5000,
+             "data": keep_text, "hash": sha256_text(keep_text)},
+        ]}, token=token_alice)
+        status, body = share_call("POST", sync + "/shares/request",
+                                  {"path": "notes/keep.md", "target": "bob"}, token=token_alice)
+        keep_share = body.get("share", {}).get("id", "")
+        check("第二个所有者也能发出邀请", status == 200 and keep_share == "alice~keep~bob", repr(body)[:160])
+        share_call("POST", sync + "/shares/respond", {"id": keep_share, "accept": True}, token=token_bob)
+        bob_cursor = share_call("GET", sync + "/ops?since=0", token=token_bob)[1]["ops"][-1]["seq"]
+
+        status, body = share_admin("POST", API_PREFIX + "/setup-password", {"password": "admin-pass-99"})
+        check("共享用例的管理员设密码并登录", status == 200 and bool(share_cookies), repr(body)[:120])
+        status, body = share_admin("POST", API_PREFIX + "/users/delete", {"id": "alice"})
+        check("删除共享中的所有者的账户", status == 200, repr(body)[:120])
+        status, body = share_call("GET", sync + "/shares", token=token_bob)
+        check("账户被删后与它有关的共享一并作废", body["received"] == [] and body["incoming"] == [],
+              repr(body)[:160])
+        status, body = share_call("GET", sync + "/ops?since={}".format(bob_cursor), token=token_bob)
+        check("账户被删后接收方那边收到删除",
+              [item["op"] for item in body["ops"] if item.get("path") == "shared/alice/keep.md"] == ["del"],
+              repr(body["ops"])[-200:])
+
+        share_httpd.shutdown()
+        share_httpd.server_close()
 
         log("INFO", "Selftest", "section=forced-auth")
         strict_httpd, _ = create_server("127.0.0.1", 0, os.path.join(tmp, "strict-data"), "")
