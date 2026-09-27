@@ -52,13 +52,10 @@ HEALTH_PATH = "/health"
 # 网页版客户端在根路径：/ 返回页面，静态资源按白名单从 web/ 目录取。
 # PWA 那几件（清单、Service Worker、图标）也都挂在根路径上，一并列进白名单
 WEB_ASSET_PATHS = (
-    "/favicon.png",
+    "/Main.new.svg",
+    "/Main.new.png",
     "/manifest.webmanifest",
     "/sw.js",
-    "/icon-180.png",
-    "/icon-192.png",
-    "/icon-512.png",
-    "/icon-512-maskable.png",
 )
 WEB_ASSET_PREFIXES = ("/styles/", "/scripts/", "/fonts/")
 # 网页版客户端单独成仓库：启动时克隆到 web/，页面与静态资源都取自那份克隆
@@ -66,7 +63,7 @@ WEB_REPO_URL = "https://github.com/EsprinProject/Web.git"
 WEB_REPO_REF = "main"
 GIT_TIMEOUT_SECONDS = 180
 # 管理后台在 /admin：页面静态资源（样式、脚本、图标、字体）从 manager/ 目录按 /admin/ 下的路径取
-MANAGER_ASSET_PATHS = ("/app.css", "/app.js", "/favicon.png")
+MANAGER_ASSET_PATHS = ("/app.css", "/app.js", "/Main.new.svg")
 MANAGER_ASSET_PREFIXES = ("/fonts/",)
 PBKDF2_ITERATIONS = 200_000
 PBKDF2_SALT_BYTES = 16
