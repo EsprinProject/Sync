@@ -151,19 +151,17 @@ const state = {
     passwordSet: false,
     loggedIn: false,
     admin: false,
-    // 当前登录的账户（任何账户登录都会填上，管理面板只对管理员展示）
+
     user: null,
     accountCount: 0,
     tokenCount: 0,
     users: [],
-    // 正在管理的账户 id：令牌与日志两节都作用在它上面
+
     account: '',
 };
 
-// 数据与日志一节的常驻说明：登录前、出错时都会回到这句
 const JOURNAL_IDLE_HINT = '下载得到的是当前账户那份 journal.log 的快照；这个账户的全部笔记与待办就在其中。';
 
-// 管理面板只对管理员账户开放
 function panelReady() {
     return state.loggedIn && state.admin;
 }
@@ -174,8 +172,7 @@ function render() {
     $('view-panel').hidden = !panelReady();
     $('logout-btn').hidden = !state.loggedIn;
 
-    // 登录成功后登录页被收起：回到登录模式，顺手把上一次签发的令牌明文清掉（它只该在那一次显示里出现）
-    if (panelReady()) {
+if (panelReady()) {
         setLoginMode(false);
 
         $('header-desc').textContent = '当前账户 ' + (state.user ? state.user.name : '')
@@ -210,8 +207,6 @@ async function refresh() {
     await loadTokens();
     await loadJournal();
 }
-
-/* ---------------- 账户 ---------------- */
 
 function accountQuery() {
     return state.account ? '?user=' + encodeURIComponent(state.account) : '';
@@ -300,7 +295,7 @@ function userRow(record) {
     nameInput.placeholder = '账户名';
     nameInput.value = record.name;
     if (record.builtIn) {
-        // 内置账户的名字同时是它的数据目录名，不允许改
+
         nameInput.disabled = true;
         nameInput.title = '内置账户 admin 不能改名';
     }
@@ -413,7 +408,7 @@ async function loadUsers() {
 
     state.users = Array.isArray(data.users) ? data.users : [];
     state.accountCount = state.users.length;
-    // 选中的账户被删掉时落回自己
+
     if (!accountById(state.account)) {
         state.account = (state.user && state.user.id) || (state.users[0] ? state.users[0].id : '');
     }
@@ -607,7 +602,7 @@ function formatFileSize(bytes) {
 
 function describeJournal(data) {
     if (!data || !data.exists || !Number(data.ops)) return '';
-    // 「可复用 ID」是删除腾出来的 ID：新建条目会优先把它们再用起来
+
     const recyclable = Number(data.recyclable);
     return Number(data.ops) + ' 条操作 · 存活文件 ' + Number(data.files) + ' · 删除记录 ' + Number(data.deleted)
         + (recyclable ? '（可复用 ID ' + recyclable + '）' : '')
@@ -644,7 +639,7 @@ async function loadJournal() {
     }
 
     summary.textContent = text;
-    // 日志身份：与客户端「诊断」报告里的同一项对得上，说明两边看的是同一份日志
+
     summary.title = data.journalId ? '日志身份：' + data.journalId : '';
     button.disabled = false;
     if (compactButton) compactButton.disabled = false;
@@ -714,13 +709,11 @@ async function downloadJournal() {
         toast('下载失败，请检查网络后重试', 'error');
     } finally {
         button.textContent = button.dataset.idle || '下载日志';
-        // 下载期间可能又有新的操作写进日志：顺手刷新一次概览（它也会重新决定按钮是否可用）
+
         if (!sessionLost) await loadJournal();
     }
 }
 
-/* 整理日志：把已彻底删除的条目从日志里真正抹掉（每条只留一行删除标记，序号一律不变）。
-   客户端推上一条删除时服务端会自动做这件事，这里是把以前积压下来的旧记录一并清掉。 */
 async function compactJournal() {
     const button = $('journal-compact');
     if (!button || button.disabled) return;
@@ -785,7 +778,7 @@ async function submitLogin() {
     const { status, data } = await api('/login', {
         name,
         password: $('login-pass').value,
-        // 本页只让管理员进：非管理员账户请从客户端登录
+
         requireAdmin: true,
     });
     if (status !== 200) return setMessage('login-msg', data.error || '登录失败', 'error');
@@ -828,16 +821,6 @@ async function createToken() {
     showSecret('new-secret');
 }
 
-/* ---------------- 生成访问令牌（账户名 + 密码，不需要管理员身份） ----------------
-
-   与「新建令牌」一节的分别：那条路要先用管理员账户登录、再选中令牌的归属账户；
-   这条路只要知道某个账户自己的密码，服务端就为它签发一份令牌（见 sync.py 的 /admin/api/tokens/generate），
-   因此非管理员也能自助取一份去配置客户端。
-
-   登录卡片因此有两种模式，共用同一对账户名 / 密码输入框与同一条提示行：
-   - 登录（默认）：点「登录」进管理后台；
-   - 设置令牌：点「生成令牌」切过来，露出名称与绑定设备这两个选项，再点一次「生成令牌」才真的签发。
-   一次点击不会在你还没确认要发什么之前就把令牌建出来；这一模式下左边的按钮换成「返回登录」。 */
 let tokenMode = false;
 
 const GATE_MODE_TEXT = {
@@ -859,18 +842,16 @@ function setLoginMode(token) {
     $('gate-title').textContent = text.title;
     $('gate-desc').textContent = text.desc;
     $('gate-token-options').hidden = !tokenMode;
-    // 按钮上写清当前模式下它们各自会做什么：另一格永远是可以退回的那条路
+
     $('login-btn').textContent = tokenMode ? '返回登录' : '登录';
     $('login-btn').classList.toggle('primary', !tokenMode);
     $('token-gen-btn').classList.toggle('primary', tokenMode);
 
-    // 上一次的结果与提示都属于另一模式，切过来就清掉
-    $('token-value').textContent = '';
+$('token-value').textContent = '';
     $('token-secret').hidden = true;
     setMessage('login-msg', tokenMode ? '填好账户名与密码（可再指定名称与绑定设备 id），再点一次「生成令牌」。' : '');
 }
 
-// 「生成令牌」的第一下只是切到设置令牌，第二下才真的去签发
 async function clickTokenButton() {
     if (!tokenMode) {
         setLoginMode(true);
@@ -928,14 +909,14 @@ async function createUser() {
     $('user-pass').value = '';
     $('user-admin').checked = false;
     toast('已新建账户「' + data.user.name + '」');
-    // 新建的账户直接选上：接着就能给它建令牌
+
     state.account = data.user.id;
     await reloadUsers();
 }
 
 function bindEvents() {
     $('setup-btn').addEventListener('click', submitSetup);
-    // 设置令牌模式下这一格是「返回登录」：先退回登录，再点一次才去登录
+
     $('login-btn').addEventListener('click', () => {
         if (tokenMode) {
             setLoginMode(false);
@@ -952,14 +933,13 @@ function bindEvents() {
     $('account-select').addEventListener('change', async (event) => {
         state.account = event.currentTarget.value;
         renderAccountMeta();
-        // 换了账户，令牌与日志两节跟着换
+
         await loadTokens();
         await loadJournal();
     });
     $('new-btn').addEventListener('click', createToken);
 
-    // 登录卡片里的「生成令牌」：第一下切到设置令牌、第二下签发，失败在卡片里原地说明
-    const runGenerate = () => {
+const runGenerate = () => {
         clickTokenButton().catch((error) => {
             console.error('生成令牌失败:', error);
             setMessage('login-msg', '生成失败，请检查网络后重试', 'error');
@@ -969,8 +949,7 @@ function bindEvents() {
     $('token-copy').addEventListener('click', (event) => copyElement('token-value', event.currentTarget));
     selectAllOnClick('token-value');
 
-    // 账户名与密码两格在两个模式下含义相同：回车按当前模式决定是登录还是签发
-    const submitGate = () => (tokenMode ? runGenerate() : submitLogin());
+const submitGate = () => (tokenMode ? runGenerate() : submitLogin());
 
     $('pass-btn').addEventListener('click', submitPasswordChange);
     $('logout-btn').addEventListener('click', async () => {

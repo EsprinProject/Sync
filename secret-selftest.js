@@ -1,9 +1,4 @@
 #!/usr/bin/env node
-/* 网页版秘密本自测：Web 仓库（EsprinProject/Web）的 scripts/secret.js，服务端克隆在 web/ 下。
-   信封是两端共用的契约，这里逐个用例与 node:crypto（桌面版的实现）对拆：
-   本文件产出的密文交给 node 解、node 产出的密文交给本文件解，两边都必须还原出同一份正文。
-
-   运行：node secret-selftest.js（在仓库根目录，需已克隆网页版客户端） */
 
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -33,14 +28,8 @@ function check(name, fn) {
     }
 }
 
-/* ---------------- 装载被测脚本 ----------------
-   web/scripts/secret.js 是给浏览器写的经典脚本，顶层只有常量与函数声明，
-   这里补一个 window 壳（取随机盐与 IV 用得到 crypto.getRandomValues）后再求值。 */
-
 globalThis.window = globalThis.window || { crypto: globalThis.crypto };
 
-// secret.js 里少数函数会回用到 store.js / ui.js 的助手（状态文案、时间格式），
-// 本文件只测加解密与信封，这两者补一份最小实现就够
 globalThis.itemKindLabel = (item) => (item && item.isTodo === true ? '待办' : '笔记');
 globalThis.formatDate = (stamp) => new Date(Number(stamp) || Date.now()).toISOString();
 
@@ -53,7 +42,6 @@ const EXPORTS = [
     'SECRET_ITERATIONS', 'SECRET_ENVELOPE_HEAD', 'secretUnlocked'
 ];
 
-// 网页版脚本来自 Web 仓库：本地没克隆就没得测，直接报出缺的是哪一份文件
 if (!fs.existsSync(SECRET_JS)) {
     log('ERROR', 'Selftest', `找不到网页版脚本，先把 Web 仓库克隆到 web/ (path=${SECRET_JS})`);
     process.exit(1);
@@ -62,8 +50,6 @@ if (!fs.existsSync(SECRET_JS)) {
 const source = fs.readFileSync(SECRET_JS, 'utf8');
 vm.runInThisContext(`${source}\nglobalThis.__secret = { ${EXPORTS.join(', ')} };`, { filename: SECRET_JS });
 const S = globalThis.__secret;
-
-/* ---------------- 桌面版的实现（node:crypto） ---------------- */
 
 const HEAD = '-----ESPRIN SECRET-----';
 const TAIL = '-----END ESPRIN SECRET-----';
@@ -98,8 +84,6 @@ function desktopOpen(password, envelope) {
     return Buffer.concat([decipher.update(raw.subarray(0, raw.length - 16)), decipher.final()]).toString('utf8');
 }
 
-/* ---------------- 摘要与派生 ---------------- */
-
 log('INFO', 'Selftest', 'section=sha256-and-pbkdf2');
 
 check('SHA-256 与 node:crypto 一致', () => {
@@ -128,8 +112,6 @@ check('PBKDF2-HMAC-SHA256 与 node:crypto 一致', () => {
     });
 });
 
-/* ---------------- AES-256-GCM ---------------- */
-
 log('INFO', 'Selftest', 'section=aes-gcm');
 
 check('AES-256-GCM 与 node:crypto 双向一致', () => {
@@ -139,15 +121,13 @@ check('AES-256-GCM 与 node:crypto 双向一致', () => {
         const iv = nodeCrypto.randomBytes(12);
         const plaintext = Buffer.from('中文段落与 ascii 混合 '.repeat(80), 'utf8').subarray(0, length);
 
-        // 本文件加密 → node 解密
-        const sealed = Buffer.from(S.secretGcmSeal(key, iv, plaintext));
+const sealed = Buffer.from(S.secretGcmSeal(key, iv, plaintext));
         const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, iv);
         decipher.setAuthTag(sealed.subarray(sealed.length - 16));
         const opened = Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - 16)), decipher.final()]);
         assert.ok(opened.equals(plaintext), `长度 ${length} 的密文在 node 侧解不出原文`);
 
-        // node 加密 → 本文件解密
-        const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
         const produced = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
         const back = S.secretGcmOpen(key, iv, new Uint8Array(produced));
         assert.ok(back && Buffer.from(back).equals(plaintext), `长度 ${length} 的密文在本文件里解不出原文`);
@@ -169,8 +149,6 @@ check('认证标签对不上时拒绝解密', () => {
 
     assert.strictEqual(S.secretGcmOpen(nodeCrypto.randomBytes(32), iv, sealed), null, '换一把密钥仍解出了内容');
 });
-
-/* ---------------- 信封（两端契约） ---------------- */
 
 log('INFO', 'Selftest', 'section=envelope');
 

@@ -28,29 +28,28 @@ JOURNAL_ID_NAME = "journal.id"
 
 USERS_FILE_NAME = "users.json"
 USERS_DIR_NAME = "users"
-# 每人的令牌放在自己的目录里，沿用旧版的文件名
+
 TOKENS_FILE_NAME = "tokens.json"
-# 内置账户：服务端始终保留它，不可删除、不可停用、不可取消管理员
+
 DEFAULT_ACCOUNT_ID = "admin"
 DEFAULT_ACCOUNT_NAME = "admin"
 ACCOUNT_NAME_MAX = 32
-# 旧版单账户布局：数据目录根下的 admin.json 与日志文件，首次启动时迁移进内置账户的目录
+
 LEGACY_ADMIN_FILE_NAME = "admin.json"
-# 账户 id 会当目录名用，Windows 上这几个名字不能作目录
+
 RESERVED_DIR_NAMES = frozenset(
     ["con", "prn", "aux", "nul"]
     + ["com{}".format(index) for index in range(1, 10)]
     + ["lpt{}".format(index) for index in range(1, 10)]
 )
 ADMIN_COOKIE_NAME = "esprin_admin"
-# 三个入口各占一段前缀：网页版客户端在根路径，管理后台在 /admin，同步接口在 /sync
+
 SYNC_PATH = "/sync"
 ADMIN_PATH = "/admin"
-# 管理接口前缀：管理页挂在 /admin 下，接口随之挂在 /admin/api 下
+
 API_PREFIX = ADMIN_PATH + "/api"
 HEALTH_PATH = "/health"
-# 网页版客户端在根路径：/ 返回页面，静态资源按白名单从 web/ 目录取。
-# PWA 那几件（清单、Service Worker、图标）也都挂在根路径上，一并列进白名单
+
 WEB_ASSET_PATHS = (
     "/Main.new.svg",
     "/Main.new.png",
@@ -58,11 +57,11 @@ WEB_ASSET_PATHS = (
     "/sw.js",
 )
 WEB_ASSET_PREFIXES = ("/styles/", "/scripts/", "/fonts/")
-# 网页版客户端单独成仓库：启动时克隆到 web/，页面与静态资源都取自那份克隆
+
 WEB_REPO_URL = "https://github.com/EsprinProject/Web.git"
 WEB_REPO_REF = "main"
 GIT_TIMEOUT_SECONDS = 180
-# 管理后台在 /admin：页面静态资源（样式、脚本、图标、字体）从 manager/ 目录按 /admin/ 下的路径取
+
 MANAGER_ASSET_PATHS = ("/app.css", "/app.js", "/Main.new.svg")
 MANAGER_ASSET_PREFIXES = ("/fonts/",)
 PBKDF2_ITERATIONS = 200_000
@@ -76,49 +75,35 @@ DEFAULT_PAGE_LIMIT = 500
 MAX_PAGE_LIMIT = 2000
 MAX_DATA_CHARS = 8 * 1024 * 1024
 FORBIDDEN_PATH_PARTS = ("..",)
-# 可复用 ID（回收池）：
-#   条目被删除后，它的路径会一直留在 deleted 里（别处的老副本因此不会被推回来），
-#   但那个 ID 不必永久占着——新建条目时优先把 ID 还回去再用。
-#   服务端只把同一个 ID 发给一台设备：领走的会被占住 RECYCLE_HOLD_SECONDS 秒，
-#   直到条目真的被创建（put 会同时撤销删除记录与占位），或者占位超时自然回到池子里。
+
 ITEM_PATH_PATTERN = re.compile(r"^(notes|todos)/([A-Za-z0-9_-]{1,64})\.md$")
 RECYCLE_HOLD_SECONDS = 15 * 60
 RECYCLE_POOL_LIMIT = 500
 RECYCLE_CLAIM_MAX = 8
 
-# 团队笔记（共享笔记）：
-#   共享是一条「把谁的哪一篇共享给谁」的记录（shares.json），正文不复制——两位使用者
-#   各自的那份日志仍是唯一真相。接收方拿到的是所有者那篇内容的一条投影，落在它的
-#   shared/<所有者 id>/<条目 id>.md 上；接收方写回去的操作由服务端改写路径后
-#   落进所有者的日志，因此两人看到的始终是同一篇。
 SHARES_FILE_NAME = "shares.json"
 SHARE_PREFIX = "shared"
 SHARE_STATUS_PENDING = "pending"
 SHARE_STATUS_ACCEPTED = "accepted"
-# 接收方的投影路径：shared/<所有者 id>/<条目 id>.md
+
 SHARED_PATH_PATTERN = re.compile(r"^shared/([A-Za-z0-9_-]{1,64})/([A-Za-z0-9_-]{1,64})\.md$")
-# 笔记文件里内嵌元数据的标题行（见 Nemo 的 serializeItemFile）
+
 NOTE_TITLE_LINE_PATTERN = re.compile(r"^[ \t]*title:[ \t]*(.*)$", re.MULTILINE)
 NOTE_META_OPEN = "<!--EsprinData"
-
 
 def now_ms():
     return int(time.time() * 1000)
 
-
 def journal_download_name():
     return "esprin-journal-{}.log".format(time.strftime("%Y%m%d-%H%M%S"))
 
-
 def sha256_text(text):
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
-
 
 def log(level, component, message):
     stream = sys.stderr if level in ("WARN", "ERROR") else sys.stdout
     stream.write("[{}] [{}] {}\n".format(level, component, message))
     stream.flush()
-
 
 def normalize_relative_path(value):
     text = str(value or "").strip().replace("\\", "/")
@@ -130,7 +115,6 @@ def normalize_relative_path(value):
     if not parts or any(part in FORBIDDEN_PATH_PARTS for part in parts):
         return ""
     return "/".join(parts)
-
 
 def note_title_from_data(data, encoding="utf8"):
     """从一条 put 记录的内容里取笔记标题。
@@ -165,7 +149,6 @@ def note_title_from_data(data, encoding="utf8"):
             return cleaned[:60]
     return ""
 
-
 def parse_int(value, default, minimum, maximum):
     try:
         number = int(value)
@@ -173,12 +156,10 @@ def parse_int(value, default, minimum, maximum):
         number = default
     return max(minimum, min(number, maximum))
 
-
 def hash_password(password, iterations=PBKDF2_ITERATIONS, salt=None):
     salt = salt or secrets.token_bytes(PBKDF2_SALT_BYTES)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return "pbkdf2_sha256${}${}${}".format(iterations, salt.hex(), digest.hex())
-
 
 def verify_password(password, stored):
     try:
@@ -189,7 +170,6 @@ def verify_password(password, stored):
         return hmac.compare_digest(digest.hex(), digest_hex)
     except (ValueError, TypeError):
         return False
-
 
 class UserStore:
     """账户、登录会话、访问令牌与各账户的数据日志。
@@ -210,12 +190,12 @@ class UserStore:
         self.lock = threading.RLock()
         self.secret = ""
         self.users = []
-        # 账户 id -> 令牌记录列表 / 操作日志对象
+
         self.tokens = {}
         self.journals = {}
         self.sessions = {}
         self.failures = {}
-        # 团队笔记的共享记录（跨账户，因此挂在账户表这一层）
+
         self.shares = ShareStore(data_dir)
         self._load()
 
@@ -225,8 +205,7 @@ class UserStore:
         if not self._load_users_file():
             self._bootstrap_users()
 
-        # 内置账户必须始终在：它被从 users.json 里删掉时补一个回来，避免把自己锁在门外
-        if not self.find_user(DEFAULT_ACCOUNT_ID):
+if not self.find_user(DEFAULT_ACCOUNT_ID):
             self.users.append({
                 "id": DEFAULT_ACCOUNT_ID,
                 "name": DEFAULT_ACCOUNT_NAME,
@@ -278,7 +257,7 @@ class UserStore:
 
         self.secret = str(data.get("secret") or "")
         self.users = loaded
-        # 内置账户恒为管理员且恒启用
+
         builtin = self.find_user(DEFAULT_ACCOUNT_ID)
         if builtin:
             builtin["admin"] = True
@@ -309,15 +288,13 @@ class UserStore:
             "createdAt": now_ms(),
             "lastLoginAt": 0,
         }]
-        # 账户表丢了、但数据目录还在时，把那些账户补成占位（密码无从恢复，由管理员重设）：
-        # 否则那些目录里的数据既进不去、也看不见。
-        recovered = self._recover_account_dirs()
+
+recovered = self._recover_account_dirs()
         self._save_users()
         log("INFO", "Users", "已初始化账户表: 内置账户={} 沿用旧密码={} 补回账户={}".format(
             DEFAULT_ACCOUNT_NAME, bool(password), recovered))
 
-        # 旧文件已读过一次：改名归档，免得日后再读到里面那份过期的密码摘要
-        if password or secret:
+if password or secret:
             try:
                 os.replace(legacy_path, legacy_path + ".migrated")
                 log("INFO", "Users", "旧版 admin.json 已归档为 {}(不再被读取)".format(
@@ -386,9 +363,7 @@ class UserStore:
         except OSError as error:
             log("ERROR", "Users", "写入失败: {} (path={})".format(error, path))
 
-    # ---------------- 账户 ----------------
-
-    def find_user(self, user_id):
+def find_user(self, user_id):
         wanted = str(user_id or "")
         for user in self.users:
             if user["id"] == wanted:
@@ -428,7 +403,7 @@ class UserStore:
             if not user or not verify_password(old_password, user.get("password") or ""):
                 return False
             user["password"] = hash_password(new_password)
-            # 换密码即断开该账户已登录的浏览器
+
             self.destroy_user_sessions(user["id"])
             self._save_users()
             return True
@@ -473,7 +448,7 @@ class UserStore:
         }
 
     def _sorted_users(self):
-        # 内置账户排在最前，其余按创建时间
+
         return sorted(self.users,
                       key=lambda item: (item["id"] != DEFAULT_ACCOUNT_ID, item.get("createdAt") or 0))
 
@@ -567,8 +542,7 @@ class UserStore:
             self._save_users()
             name, removed_id = user["name"], user["id"]
 
-        # 账户目录连同数据一起删掉
-        target = self.user_dir(removed_id)
+target = self.user_dir(removed_id)
         data_removed = False
         if os.path.isdir(target):
             try:
@@ -592,9 +566,7 @@ class UserStore:
             self._save_users()
             return user, ""
 
-    # ---------------- 访问令牌 ----------------
-
-    def _token_records(self, user_id):
+def _token_records(self, user_id):
         return self.tokens.setdefault(str(user_id), [])
 
     def _tokens_path(self, user_id):
@@ -631,9 +603,7 @@ class UserStore:
                 self.journals[user_id] = found
             return found
 
-    # ---------------- 登录会话 ----------------
-
-    def create_session(self, user_id, ip):
+def create_session(self, user_id, ip):
         with self.lock:
             now = now_ms()
             self.sessions = {
@@ -783,7 +753,6 @@ class UserStore:
             if changed:
                 self._save_tokens(user_id)
 
-
 class Journal:
     def __init__(self, data_dir):
         self.data_dir = data_dir
@@ -793,9 +762,9 @@ class Journal:
         self.op_ids = {}
         self.files = {}
         self.deleted = {}
-        # 删除记录是哪台设备删的（path → device）：发起删除的那一台可以立刻把 ID 领回去用
+
         self.deleted_by = {}
-        # 已被某台设备领走、还在等它把条目建回来的 ID（path → {device, until}）
+
         self.holds = {}
         self.count = 0
         self._load()
@@ -844,7 +813,7 @@ class Journal:
         op_id = entry.get("opId")
         if op_id:
             self.op_ids[op_id] = seq
-        # 删除标记上记着已经抹掉的那些操作号：客户端断线重试同一个 opId 时照样算「收过」
+
         for purged_id in entry.get("purged") or []:
             if purged_id:
                 self.op_ids.setdefault(str(purged_id), seq)
@@ -853,13 +822,13 @@ class Journal:
         if not path:
             return
         if entry.get("op") == "del":
-            # 删除：记下删除记录（tombstone，别处的老副本不会被推回来），并把存活索引里的那条拿掉
+
             self.files.pop(path, None)
             self.deleted[path] = seq
             self.deleted_by[path] = str(entry.get("device") or "")
         else:
             self.files[path] = {"hash": entry.get("hash", ""), "seq": seq, "device": entry.get("device", "")}
-            # 条目被重新创建（可能是用回收的 ID 建的）：删除记录与领走 ID 的占位一并撤销
+
             self.deleted.pop(path, None)
             self.deleted_by.pop(path, None)
             self.holds.pop(path, None)
@@ -1016,8 +985,7 @@ class Journal:
                     except json.JSONDecodeError:
                         entries.append((None, line))
 
-            # 每条路径最后一条操作是什么、落在哪一行
-            last_op = {}
+last_op = {}
             last_index = {}
             for index, (entry, _line) in enumerate(entries):
                 path = entry.get("path") if entry else None
@@ -1026,27 +994,23 @@ class Journal:
                 last_op[path] = entry.get("op")
                 last_index[path] = index
 
-            # 最后一条是删除的路径：以前的行全部去掉，只留那条删除标记
-            removable = {path for path, op in last_op.items()
+removable = {path for path, op in last_op.items()
                          if op == "del" and (wanted is None or path in wanted)}
             markers = {last_index[path] for path in removable}
 
-            # 被抹掉的那些操作号记在删除标记上：客户端断线重试同一个 opId 时，
-            # 服务端还能认出「这条已经收过了」，不会把已经删掉的内容又写回来。
-            # （操作号里只有设备与时间，不含路径与正文。）
-            purged = {}
+purged = {}
             for index, (entry, _line) in enumerate(entries):
                 if not entry:
                     continue
                 path = entry.get("path")
                 if path not in removable:
                     continue
-                # 留下来的那条标记：把它以前记着的操作号继续带上
+
                 if index in markers:
                     for op_id in entry.get("purged") or []:
                         purged.setdefault(path, set()).add(str(op_id))
                     continue
-                # 要被抹掉的每一行：它自己的操作号，以及它以前记着的（老标记），都并到新标记上
+
                 if entry.get("opId"):
                     purged.setdefault(path, set()).add(str(entry["opId"]))
                 for op_id in entry.get("purged") or []:
@@ -1055,7 +1019,7 @@ class Journal:
             kept = []
             for index, (entry, line) in enumerate(entries):
                 if entry is not None and index not in markers and entry.get("path") in removable:
-                    continue  # 彻底删掉的条目：以前写过的都抹掉
+                    continue
                 if entry is not None and index in markers and purged.get(entry.get("path")):
                     marker = dict(entry)
                     marker["purged"] = sorted(purged[entry["path"]])
@@ -1084,7 +1048,7 @@ class Journal:
         self.deleted = {}
         self.deleted_by = {}
         self.count = 0
-        # self.holds 不动：那是「已领走、等条目落盘」的内存占位，与日志无关
+
         for entry, _line in kept:
             if entry:
                 self._index(entry)
@@ -1125,7 +1089,7 @@ class Journal:
                 "count": self.count,
                 "files": dict(self.files),
                 "deleted": dict(self.deleted),
-                # 删除腾出来的、能给新建条目再用的 ID 有多少个
+
                 "recyclable": len(self._recyclable()),
             }
 
@@ -1154,7 +1118,6 @@ class Journal:
             "updatedAt": updated_at,
             "exists": exists,
         }
-
 
 class ShareStore:
     """团队笔记的共享记录（正文不在这里）。
@@ -1331,13 +1294,10 @@ class ShareStore:
             self._save()
             return [dict(item) for item in doomed]
 
-
 MANAGER_DIR_NAME = "manager"
 WEB_DIR_NAME = "web"
 INDEX_NAME = "index.html"
-# 判定 web/ 是否算一份可用的客户端：缺任意一项都算不完整。
-# 页面在、图标字体不在的那类拷贝照样打开，只是所有图标退化成字形名文字，比整个目录缺失更难发现，
-# 因此和「没有页面」一并纳入启动检查
+
 WEB_REQUIRED_ASSETS = (
     INDEX_NAME,
     "styles/tokens.css",
@@ -1372,21 +1332,18 @@ MISSING_PAGE_HTML = """<!DOCTYPE html>
 {extra}
 </body></html>
 """
-# 网页版客户端的补白：它是独立仓库，页面由服务端克隆得到，不在本仓库里
+
 WEB_MISSING_HINT = (
     '<p style="color:#8b949e">网页版客户端来自仓库 '
     '<code style="background:#21262d;padding:2px 6px;border-radius:4px">{repo}</code>（分支 <code>{ref}</code>），'
     '由服务端启动时克隆到该目录</p>'
 )
 
-
 def manager_dir():
     return os.path.join(SCRIPT_DIR, MANAGER_DIR_NAME)
 
-
 def web_dir():
     return os.path.join(SCRIPT_DIR, WEB_DIR_NAME)
-
 
 def read_index_html(root, title, extra=""):
     path = os.path.join(root, INDEX_NAME)
@@ -1397,25 +1354,20 @@ def read_index_html(root, title, extra=""):
         return (MISSING_PAGE_HTML.replace("{title}", title).replace("{path}", path)
                 .replace("{extra}", extra))
 
-
 def read_manager_index():
     return read_index_html(manager_dir(), "管理后台")
-
 
 def read_web_index():
     return read_index_html(web_dir(), "网页版客户端",
                            WEB_MISSING_HINT.format(repo=WEB_REPO_URL, ref=WEB_REPO_REF))
-
 
 def missing_web_assets():
     """web/ 里缺的关键资源（相对路径）。空列表表示这份客户端可用。"""
     root = web_dir()
     return [rel for rel in WEB_REQUIRED_ASSETS if not os.path.isfile(os.path.join(root, rel))]
 
-
 def web_client_ready():
     return os.path.isfile(os.path.join(web_dir(), INDEX_NAME))
-
 
 def web_client_state():
     """web/ 的来路：clone（带页面的一份克隆）/ files（有页面但不是仓库）/
@@ -1429,7 +1381,6 @@ def web_client_state():
     if missing_web_assets():
         return "partial"
     return "clone" if os.path.isdir(os.path.join(web_dir(), ".git")) else "files"
-
 
 def remove_tree(path):
     """整目录删掉（不存在就什么都不做）。
@@ -1445,7 +1396,6 @@ def remove_tree(path):
             except OSError:
                 pass
     shutil.rmtree(path, ignore_errors=True)
-
 
 def run_git(args, cwd=None):
     """跑一条 git 命令；返回 (ok, detail)，detail 是 git 的输出或失败原因。"""
@@ -1463,7 +1413,6 @@ def run_git(args, cwd=None):
         return False, output or "exit={}".format(result.returncode)
     return True, output
 
-
 def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clone=True):
     """让网页版客户端就位：web/ 里没有页面就从 Web 仓库克隆，update 时再 ff-only 拉一次。
 
@@ -1476,12 +1425,12 @@ def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clo
     restored = False
 
     if state == "files":
-        # 目录里的页面不是克隆来的（手工放的），原样使用，也没有可拉的上游
+
         log("WARN", "Web", "dir is not a clone, served as is (dir={})".format(root))
         return
 
     if state == "partial":
-        # 克隆里本来就该有这些文件：先就地还原，省一次整份克隆
+
         if os.path.isdir(os.path.join(root, ".git")):
             ok, detail = run_git(["checkout", "--", "."], cwd=root)
             missing = missing_web_assets()
@@ -1492,7 +1441,7 @@ def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clo
                 log("ERROR", "Web", "restore failed: missing={} ok={} detail={}".format(
                     ",".join(missing), ok, detail))
         if not restored:
-            # 没有可还原的上游（手工拷贝的旧快照，或克隆里本身也缺）：交给下面的整份克隆
+
             log("WARN", "Web", "incomplete client: missing={} dir={}".format(
                 ",".join(missing_web_assets()), root))
 
@@ -1501,9 +1450,8 @@ def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clo
             log("WARN", "Web", "clone skipped: state={} missing={} dir={} flag=--no-web-clone".format(
                 state, ",".join(missing_web_assets()) or "-", root))
             return
-        # 克隆要求目标不存在或是空的，而 web/ 下可能留着手工放的零散文件：
-        # 先克隆到旁边的临时目录，成了再整体换过去（失败时原地那份一个字节不动）
-        staging = tempfile.mkdtemp(prefix=".web-clone-", dir=SCRIPT_DIR)
+
+staging = tempfile.mkdtemp(prefix=".web-clone-", dir=SCRIPT_DIR)
         ok, detail = run_git(["clone", "--depth", "1", "--branch", ref, repo_url, staging])
         if not ok:
             remove_tree(staging)
@@ -1531,7 +1479,6 @@ def ensure_web_client(repo_url=WEB_REPO_URL, ref=WEB_REPO_REF, update=False, clo
     missing = missing_web_assets()
     log("WARN" if missing else "INFO", "Web", "pull done repo={} ref={} missing={}".format(
         repo_url, ref, ",".join(missing) or "-"))
-
 
 class ApiHandler(BaseHTTPRequestHandler):
     server_version = f"{SERVER_NAME}/{SERVER_VERSION}"
@@ -1587,20 +1534,16 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _client_ip(self):
         return self.client_address[0] if self.client_address else ""
 
-    # 同源判定：Origin 存在时必须与请求的 Host 一致（跨站请求即使带上 Cookie 也在这里被挡下）。
-    # 同源 GET 一般不携带 Origin，此时交给 SameSite=Lax 的 Cookie 策略兜底：
-    # 跨站 POST 不会带上登录态，而读取类接口都是 GET，没有副作用。
-    def _is_same_origin(self):
+def _is_same_origin(self):
         origin = self.headers.get("Origin", "")
         if not origin:
             return True
         parsed_origin = urlparse(origin)
         return bool(parsed_origin.netloc) and parsed_origin.netloc == self.headers.get("Host", "")
 
-    # 静态资源：相对路径先归一化，再确认落在指定根目录内，避免穿越到目录之外
-    def _send_static_asset(self, root, relative, fallback_name=""):
+def _send_static_asset(self, root, relative, fallback_name=""):
         relative = str(relative or fallback_name).lstrip("/")
-        # 两边都规整过再比前缀：root 由启动参数拼出，可能带着未展开的段
+
         root = os.path.abspath(root)
         target = os.path.abspath(os.path.join(root, relative))
         if not target.startswith(root + os.sep) or not os.path.isfile(target):
@@ -1674,13 +1617,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             user = self.users.find_user(user_id)
             if not user or not user["enabled"]:
                 return None, "该令牌所属的账户已停用"
-            # record 是存储里的那份记录本身：记「最近使用」时要就地改它
+
             return {"id": record["id"], "name": record.get("name", ""), "device": record.get("device", ""),
                     "builtin": False, "userId": user_id, "userName": user["name"], "record": record}, ""
 
-        # 同源请求：认登录会话（就在本服务端登录，同源页面可直接读写同步接口）。
-        # 未配置任何凭据时不再放行：读写一律要求登录会话或访问令牌
-        if self._is_same_origin():
+if self._is_same_origin():
             user = self._current_user()
             if user:
                 return {"id": "", "name": "登录会话 {}".format(user["name"]), "device": "",
@@ -1697,14 +1638,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
 
-    # ---------------- 团队笔记（共享笔记） ----------------
-    #
-    # 正文始终只存在所有者那份日志里。接收方看到的是同一条内容在它自己日志里的投影，
-    # 路径为 shared/<所有者 id>/<条目 id>.md；接收方写回的操作由服务端改写路径后
-    # 落进所有者的日志，所有者的改动再投影回各个接收方。两个方向都不复制正文，
-    # 因此两边始终是同一篇，不会各改各的。
-
-    def _user_name(self, user_id):
+def _user_name(self, user_id):
         user = self.users.find_user(user_id)
         return user["name"] if user else ""
 
@@ -1951,9 +1885,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
 
         if parsed.path == SYNC_PATH + "/health":
-            # 不带凭据时只报服务端身份（同步相关的两项留空）：健康检查不该泄露任何一个账户的规模。
-            # 带凭据时补上该凭据所属账户的日志身份，客户端靠它发现日志被换过。
-            payload = {
+
+payload = {
                 "ok": True,
                 "name": SERVER_NAME,
                 "version": SERVER_VERSION,
@@ -1991,8 +1924,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # 网页版客户端：根路径返回页面（页面来自 Web 仓库的克隆），静态资源按白名单从同一目录取
-        if parsed.path in ("/", "/index.html"):
+if parsed.path in ("/", "/index.html"):
             page = read_web_index()
             self._send(200 if web_client_ready() else 503, raw=page.encode("utf-8"),
                        content_type="text/html; charset=utf-8",
@@ -2003,13 +1935,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send_web_asset(parsed.path)
             return
 
-        # 管理接口：/admin/api/*
-        if parsed.path.startswith(API_PREFIX + "/"):
+if parsed.path.startswith(API_PREFIX + "/"):
             self._handle_admin_get(parsed.path, query)
             return
 
-        # 管理页：/admin 返回页面，页面资源（样式、脚本、图标、字体）也从它下面取
-        if parsed.path == ADMIN_PATH or parsed.path.startswith(ADMIN_PATH + "/"):
+if parsed.path == ADMIN_PATH or parsed.path.startswith(ADMIN_PATH + "/"):
             rest = parsed.path[len(ADMIN_PATH):]
             if rest in ("", "/", "/" + INDEX_NAME):
                 page = read_manager_index()
@@ -2027,8 +1957,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(401, {"ok": False, "error": error})
             return
 
-        # 下面这一段是同步接口：一律作用在当前凭据所属账户的那份日志上
-        journal = self._journal_for(record["userId"])
+journal = self._journal_for(record["userId"])
 
         if parsed.path == SYNC_PATH + "/ops":
             since = int((query.get("since") or ["0"])[0] or 0)
@@ -2043,8 +1972,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # 可复用 ID：被删除的条目腾出来的 ID（最近删掉的排在前面），供新建的条目领取
-        if parsed.path == SYNC_PATH + "/ids":
+if parsed.path == SYNC_PATH + "/ids":
             limit = parse_int((query.get("limit") or [""])[0], RECYCLE_POOL_LIMIT, 1, RECYCLE_POOL_LIMIT)
             pool = journal.recyclable(limit)
             self._send(200, {"ok": True, "count": len(pool), "ids": pool})
@@ -2057,8 +1985,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, state)
             return
 
-        # 团队笔记：我共享出去的、别人共享给我待确认的、以及已经共享到手的
-        if parsed.path == SYNC_PATH + "/shares":
+if parsed.path == SYNC_PATH + "/shares":
             self._handle_sync_get_shares(record)
             return
 
@@ -2095,8 +2022,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(401, {"ok": False, "error": error})
             return
 
-        # 同步接口一律作用在当前凭据所属账户的那份日志上
-        journal = self._journal_for(record["userId"])
+journal = self._journal_for(record["userId"])
 
         if parsed.path == SYNC_PATH + "/ops":
             payload = self._read_json()
@@ -2114,8 +2040,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     if isinstance(raw, dict):
                         raw.pop("device", None)
 
-            # 先分流：接收方写回共享笔记的操作要改写路径后落进所有者的日志
-            own = []
+own = []
             routed = {}
             rejected = []
             for raw in payload["ops"]:
@@ -2139,7 +2064,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     if item.get("error"):
                         accepted.append(item)
                         continue
-                    # 序号属于所有者那份日志，与本机游标没有可比性：只回操作号，不回序号
+
                     accepted.append({"opId": raw.get("opId"), "seq": 0, "routed": True})
                 self._publish_shared_ops(owner_id, items, results, exclude=record["userId"])
             accepted += rejected
@@ -2147,8 +2072,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             if record.get("record"):
                 self.users.note_token_use(record["userId"], record["record"], str(payload.get("device") or ""))
 
-            # 彻底删除（del）之后，这条路径的正文历史不必再留在日志里：只留那一条删除标记
-            deleted_paths = [raw.get("path") for raw in own
+deleted_paths = [raw.get("path") for raw in own
                              if isinstance(raw, dict) and raw.get("op") == "del"]
             if deleted_paths:
                 compacted = journal.compact(deleted_paths)
@@ -2165,9 +2089,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # 新建条目时领一个可复用的 ID：服务端把领走的占住一会儿，
-        # 免得两台设备同时新建时拿到同一个 ID（占位在条目被创建或超时后失效）
-        if parsed.path == SYNC_PATH + "/ids/claim":
+if parsed.path == SYNC_PATH + "/ids/claim":
             payload = self._read_json() or {}
             if not isinstance(payload, dict):
                 payload = {}
@@ -2175,7 +2097,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             if kind not in ("notes", "todos"):
                 kind = ""
             count = parse_int(payload.get("count"), 1, 1, RECYCLE_CLAIM_MAX)
-            # since 缺省时不筛：只发该设备确认已经重放过删除的那些 ID（不过滤则全部可领）
+
             since = payload.get("since")
             if since is not None:
                 since = parse_int(since, 0, 0, 2 ** 62)
@@ -2184,16 +2106,12 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "count": len(picked), "pending": pending, "ids": picked})
             return
 
-        # 团队笔记：邀请 / 同意 / 拒绝 / 撤销 / 退出
-        if parsed.path.startswith(SYNC_PATH + "/shares/") and self._handle_sync_post_share(parsed.path, record):
+if parsed.path.startswith(SYNC_PATH + "/shares/") and self._handle_sync_post_share(parsed.path, record):
             return
 
         self._send(404, {"ok": False, "error": "未知接口"})
 
-    # ---------------- 管理接口 ----------------
-    # 除 status / login / logout / 换访问令牌 / 改自己的密码之外，一律要求管理员账户
-
-    def _admin_guard(self):
+def _admin_guard(self):
         """已登录且是管理员时返回账户，否则自行作答并返回 None。"""
         user = self._current_user()
         if not user:
@@ -2293,7 +2211,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self.users.note_login_failure(ip)
                 self._send(401, {"ok": False, "error": error})
                 return
-            # 管理后台只允许管理员登录；网页版客户端走同一个接口，用 requireAdmin 区分
+
             if payload.get("requireAdmin") and not user["admin"]:
                 self._send(403, {"ok": False, "error": "该账户不是管理员，无法进入管理后台"})
                 return
@@ -2305,9 +2223,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             }, extra_headers={"Set-Cookie": self._session_cookie(session_id)})
             return
 
-        # 客户端登录：账户名 + 密码直接换一个访问令牌（明文只在这个响应里出现一次）。
-        # 桌面客户端无法持有登录 Cookie，这一步让它把长期凭据留在服务端：本机只保存令牌。
-        if path == API_PREFIX + "/tokens/generate":
+if path == API_PREFIX + "/tokens/generate":
             ip = self._client_ip()
             if not self.users.login_allowed(ip):
                 self._send(429, {"ok": False, "error": "尝试次数过多，请稍后再试"})
@@ -2344,8 +2260,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True}, extra_headers={"Set-Cookie": self._expired_cookie()})
             return
 
-        # 改自己的密码：任何已登录账户都能改
-        if path == API_PREFIX + "/password":
+if path == API_PREFIX + "/password":
             new_password = str(payload.get("newPassword") or "")
             if len(new_password) < MIN_PASSWORD_LENGTH:
                 self._send(400, {"ok": False, "error": "新密码至少 {} 位".format(MIN_PASSWORD_LENGTH)})
@@ -2357,8 +2272,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True}, extra_headers={"Set-Cookie": self._session_cookie(session_id)})
             return
 
-        # 以下都只有管理员能做
-        if not current["admin"]:
+if not current["admin"]:
             self._send(403, {"ok": False, "error": "该账户没有管理权限"})
             return
 
@@ -2399,8 +2313,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "users": self.users.list_users()})
             return
 
-        # 令牌与日志都以某个账户为对象，缺省即管理员自己
-        user_id, error = self._resolve_account(payload.get("user"), current["id"])
+user_id, error = self._resolve_account(payload.get("user"), current["id"])
         if not user_id:
             self._send(404, {"ok": False, "error": error})
             return
@@ -2441,8 +2354,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "tokens": self.users.list_tokens(user_id)})
             return
 
-        # 整理日志：把已彻底删除的路径的正文历史抹掉，只留删除标记（序号不变）
-        if path == API_PREFIX + "/journal/compact":
+if path == API_PREFIX + "/journal/compact":
             compacted = self.users.journal(user_id).compact()
             compacted["ok"] = True
             compacted["user"] = user_id
@@ -2452,13 +2364,11 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         self._send(404, {"ok": False, "error": "未知接口"})
 
-
 def create_server(host, port, data_dir, token):
     users = UserStore(data_dir)
     handler = type("BoundApiHandler", (ApiHandler,), {"users": users, "token": token})
     httpd = ThreadingHTTPServer((host, port), handler)
     return httpd, users
-
 
 def selftest():
     import json as _json
@@ -2604,8 +2514,7 @@ def selftest():
               and all(item["path"] != "notes/two.md" or item["op"] == "del" for item in body["ops"]),
               repr(body["ops"])[:200])
 
-        # 被抹掉的那条 put 的操作号记在删除标记上：断线重试同一个 opId 仍然算「收过」，不会把内容写回来
-        status, body = post(sync + "/ops", {
+status, body = post(sync + "/ops", {
             "device": "dev-a",
             "ops": [{"opId": "a-2", "op": "put", "path": "notes/two.md", "data": "第二篇",
                      "hash": sha256_text("第二篇"), "time": 1001}],
@@ -2650,7 +2559,7 @@ def selftest():
         check("越界路径被拒绝", body["ok"] is False and "路径不合法" in body.get("error", ""), repr(body))
 
         log("INFO", "Selftest", "section=web")
-        # 网页版客户端是 Web 仓库的克隆：本地没克隆就没这一节可测，跳过而不算通过
+
         if not web_client_ready():
             log("WARN", "Selftest", "网页版客户端不在 web/ 下，跳过这一节 (dir={})".format(web_dir()))
         else:
@@ -2669,9 +2578,7 @@ def selftest():
             status, body = get("/scripts/app.js", token=None)
             check("网页版脚本可直接取用", status == 200 and "showConnectGate" in body.get("_raw", ""), repr(body)[:80])
 
-            # 字体随网页版仓库分发（离线可用的前提）：直接从白名单取一次原始字节，
-            # 不走 call()——它按 UTF-8 解码，二进制会直接抛出
-            with urllib.request.urlopen(
+with urllib.request.urlopen(
                     base + "/fonts/material-symbols/material-symbols-rounded.woff2", timeout=30) as response:
                 font_status, font_bytes = response.status, response.read()
             check("网页版图标字体可直接取用（离线可用）",
@@ -2989,7 +2896,7 @@ def selftest():
         check("删除不存在的账户时 400", status == 400, repr(body))
 
         log("INFO", "Selftest", "section=shares")
-        # 共享是跨账户的事，单独起一份数据目录与一个服务端，免得影响上面那些账户与日志的断言
+
         share_dir = os.path.join(tmp, "share-data")
         share_httpd, share_users = create_server("127.0.0.1", 0, share_dir, "")
         share_port = share_httpd.server_address[1]
@@ -3025,8 +2932,7 @@ def selftest():
         check("共享用例的令牌可用",
               share_call("GET", sync + "/state", token=token_owner)[0] == 200, "")
 
-        # 所有者那篇笔记（带内嵌元数据注释，标题从注释里取）
-        note_text = ('<!--EsprinData\n    title: "课堂记录"\n    folder:\n    tags: []\n'
+note_text = ('<!--EsprinData\n    title: "课堂记录"\n    folder:\n    tags: []\n'
                      '    isPinned: false\n    isTrashed: false\n    createdAt: 1\n    updatedAt: 1\n-->\n\n正文一')
         status, body = share_call("POST", sync + "/ops", {"device": "dev-owner", "ops": [
             {"opId": "ow-1", "op": "put", "path": "notes/one.md", "time": 1000,
@@ -3047,8 +2953,7 @@ def selftest():
                                   {"path": "notes/never.md", "target": "alice"}, token=token_owner)
         check("服务端还没有的笔记不能共享", status == 400, repr(body))
 
-        # 账户名与账户 id 都可以用来指定接收方
-        status, body = share_call("POST", sync + "/shares/request",
+status, body = share_call("POST", sync + "/shares/request",
                                   {"path": "notes/one.md", "target": "alice"}, token=token_owner)
         share_alice = body.get("share", {}).get("id", "")
         check("发出共享请求",
@@ -3175,8 +3080,7 @@ def selftest():
               [item["op"] for item in body["ops"] if item.get("path") == "shared/admin/one.md"] == ["del"],
               repr(body["ops"])[-200:])
 
-        # 所有者彻底删除：共享记录随之作废，接收方那边也收到删除
-        status, body = share_call("POST", sync + "/shares/request",
+status, body = share_call("POST", sync + "/shares/request",
                                   {"path": "notes/one.md", "target": "bob"}, token=token_owner)
         share_bob = body.get("share", {}).get("id", "")
         share_call("POST", sync + "/shares/respond", {"id": share_bob, "accept": True}, token=token_bob)
@@ -3192,8 +3096,7 @@ def selftest():
               [item["op"] for item in body["ops"] if item.get("path") == "shared/admin/one.md"] == ["del"],
               repr(body["ops"])[-200:])
 
-        # 删除账户：以它为所有者的共享一并作废，接收方那边同样收到删除
-        share_cookies = {}
+share_cookies = {}
 
         def share_admin(method, path, payload=None):
             data = None
@@ -3313,8 +3216,7 @@ def selftest():
               "notes/123.md" not in pool.deleted and "notes/123.md" in pool.files
               and pool.recyclable() == [] and pool.state()["recyclable"] == 0, repr(pool.state()))
 
-        # 再删一次，这次由 dev-a 删：它自己不必等序号跟上就能把 ID 领回去，别的设备仍旧要等
-        pool.append_many("dev-a", [{"opId": "c-3b", "op": "del", "path": "notes/123.md"}])
+pool.append_many("dev-a", [{"opId": "c-3b", "op": "del", "path": "notes/123.md"}])
         own, _own_pending = pool.claim_recyclable("dev-a", "notes", 1, 0)
         check("发起删除的设备不必等自己的序号跟上就能领回这个 ID",
               [item["id"] for item in own] == ["123"], repr(own))
@@ -3362,8 +3264,7 @@ def selftest():
               trim.append_many("dev-a", [{"opId": "t-5", "op": "put", "path": "notes/later.md", "data": "后来的"}])[0]["seq"] == 5,
               repr(trim.state()))
 
-        # 又用同一个 ID 建了一篇、再彻底删掉：删除标记合并，以前记下的操作号不会丢
-        trim.append_many("dev-a", [
+trim.append_many("dev-a", [
             {"opId": "t-6", "op": "put", "path": "notes/gone.md", "data": "又建了一篇"},
             {"opId": "t-7", "op": "del", "path": "notes/gone.md"},
         ])
@@ -3439,7 +3340,6 @@ def selftest():
     log("INFO", "Selftest", "passed={} failed=0".format(passed))
     return 0
 
-
 def config_path(data_dir):
     for candidate in (
         os.path.join(data_dir, CONFIG_NAME),
@@ -3449,7 +3349,6 @@ def config_path(data_dir):
         if os.path.isfile(candidate):
             return candidate
     return os.path.join(data_dir, CONFIG_NAME)
-
 
 def read_config(data_dir):
     path = config_path(data_dir)
@@ -3476,7 +3375,6 @@ def read_config(data_dir):
 
     return config
 
-
 def lan_address():
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -3487,7 +3385,6 @@ def lan_address():
             probe.close()
     except OSError:
         return ""
-
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="EsprinSync 同步服务端（操作日志）")
@@ -3550,7 +3447,6 @@ def main(argv=None):
     finally:
         httpd.server_close()
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
